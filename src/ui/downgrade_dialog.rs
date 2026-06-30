@@ -209,5 +209,5 @@ fn build_downgrade_command(target: &CachedVersion) -> String {
     let quoted = try_quote(&path)
         .map(|cow| cow.into_owned())
         .unwrap_or_else(|_| format!("'{}'", path.replace('\'', "'\\''")));
-    return format!("sudo pacman -U --noconfirm {}", quoted);
+    return format!("daim install-file {}", quoted);
 }

@@ -128,7 +128,7 @@ pub fn logs_dir() -> Option<PathBuf> {
     } else {
         return None;
     };
-    return Some(base.join("arch-update-manager").join("logs"));
+    return Some(base.join("arch-install-manager").join("logs"));
 }
 
 pub fn open_logs_folder() {

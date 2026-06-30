@@ -1,61 +1,55 @@
-pkgname=arch-update-manager-bin
+pkgname=arch-install-manager-bin
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="A Linux Mint inspired GTK4-based update manager for Arch Linux (prebuilt binary)"
+pkgdesc="A Linux Mint inspired GTK4-based install and update manager for Arch Linux (prebuilt binary)"
 arch=('x86_64')
-url="https://github.com/destbg/arch-update-manager"
+url="https://github.com/destbg/arch-install-manager"
 license=('MIT')
-depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'expect' 'sudo' 'curl')
-provides=('arch-update-manager')
-conflicts=('arch-update-manager')
-optdepends=('paru: AUR helper support'
-            'yay: AUR helper support'
-            'shelly: AUR helper support'
-            'flatpak: Flatpak package support'
+depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
+provides=('arch-install-manager')
+conflicts=('arch-install-manager')
+optdepends=('flatpak: Flatpak package support'
             'meld: visual diff editor for pacnew files'
             'timeshift: pre-update system snapshots'
             'snapper: pre-update Btrfs snapshots'
             'aur-scanner: scan AUR packages for security issues'
             'rate-mirrors: refresh and rank the pacman mirror list')
 source=(
-  "arch-update-manager-${pkgver}-x86_64.tar.gz::${url}/releases/download/${pkgver}/arch-update-manager-${pkgver}-x86_64.tar.gz"
+  "arch-install-manager-${pkgver}-x86_64.tar.gz::${url}/releases/download/${pkgver}/arch-install-manager-${pkgver}-x86_64.tar.gz"
   "${pkgname%-bin}-${pkgver}.tar.gz::${url}/archive/refs/tags/${pkgver}.tar.gz"
 )
 sha256sums=('SKIP' 'SKIP')
 
 package() {
   cd "$srcdir"
-  install -Dm755 arch-update-manager "$pkgdir/usr/bin/arch-update-manager"
-  if [[ -f arch-update-manager-tray ]]; then
-    install -Dm755 arch-update-manager-tray "$pkgdir/usr/bin/arch-update-manager-tray"
-  fi
-  if [[ -f arch-update-manager-check ]]; then
-    install -Dm755 arch-update-manager-check "$pkgdir/usr/bin/arch-update-manager-check"
-  fi
+
+  for bin in daim daim-gui daim-helper daim-tray daim-check; do
+    if [[ -f "$bin" ]]; then
+      install -Dm755 "$bin" "$pkgdir/usr/bin/$bin"
+    fi
+  done
 
   local srcdir_repo="${srcdir}/${pkgname%-bin}-${pkgver}"
-  install -Dm644 "${srcdir_repo}/arch-update-manager.desktop" \
-    "$pkgdir/usr/share/applications/arch-update-manager.desktop"
-  install -Dm644 "${srcdir_repo}/com.destbg.arch-update-manager.policy" \
-    "$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-update-manager.policy"
+  install -Dm644 "${srcdir_repo}/arch-install-manager.desktop" \
+    "$pkgdir/usr/share/applications/arch-install-manager.desktop"
+  install -Dm644 "${srcdir_repo}/com.destbg.arch-install-manager.policy" \
+    "$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
 
-  if [[ -f "${srcdir_repo}/res/systemd/arch-update-manager-check.service" ]]; then
-    install -Dm644 "${srcdir_repo}/res/systemd/arch-update-manager-check.service" \
-      "$pkgdir/usr/lib/systemd/user/arch-update-manager-check.service"
-  fi
-  if [[ -f "${srcdir_repo}/res/systemd/arch-update-manager-check.timer" ]]; then
-    install -Dm644 "${srcdir_repo}/res/systemd/arch-update-manager-check.timer" \
-      "$pkgdir/usr/lib/systemd/user/arch-update-manager-check.timer"
-  fi
-  if [[ -f "${srcdir_repo}/res/systemd/arch-update-manager-tray.service" ]]; then
-    install -Dm644 "${srcdir_repo}/res/systemd/arch-update-manager-tray.service" \
-      "$pkgdir/usr/lib/systemd/user/arch-update-manager-tray.service"
+  for unit in daim-check.service daim-check.timer; do
+    if [[ -f "${srcdir_repo}/res/systemd/${unit}" ]]; then
+      install -Dm644 "${srcdir_repo}/res/systemd/${unit}" \
+        "$pkgdir/usr/lib/systemd/system/${unit}"
+    fi
+  done
+  if [[ -f "${srcdir_repo}/res/systemd/daim-tray.service" ]]; then
+    install -Dm644 "${srcdir_repo}/res/systemd/daim-tray.service" \
+      "$pkgdir/usr/lib/systemd/user/daim-tray.service"
   fi
 
   for size in 48x48 256x256 512x512; do
-    if [[ -f "${srcdir_repo}/icons/${size}/apps/arch-update-manager.png" ]]; then
-      install -Dm644 "${srcdir_repo}/icons/${size}/apps/arch-update-manager.png" \
-        "$pkgdir/usr/share/icons/hicolor/${size}/apps/arch-update-manager.png"
+    if [[ -f "${srcdir_repo}/icons/${size}/apps/arch-install-manager.png" ]]; then
+      install -Dm644 "${srcdir_repo}/icons/${size}/apps/arch-install-manager.png" \
+        "$pkgdir/usr/share/icons/hicolor/${size}/apps/arch-install-manager.png"
     fi
   done
 

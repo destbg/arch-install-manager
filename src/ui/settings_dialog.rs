@@ -8,7 +8,7 @@ use crate::{
         aur::is_command_available,
         logger::open_logs_folder,
         pacman_repos::get_repository_groups,
-        settings::{get_available_aur_helpers, load_settings, save_settings},
+        settings::{load_settings, save_settings},
         snapper::{is_snap_pac_installed, is_snapper_installed},
         tray_integration::{
             apply_check_schedule, apply_tray_state, has_systemd_user_session, kick_tray,
@@ -16,8 +16,8 @@ use crate::{
     },
     log_info,
     models::{
-        app_settings::AppSettings, aur_managers::AurManagers, check_schedule::CheckSchedule,
-        snapshot_group::SnapshotGroup, snapshot_retention_period::SnapshotRetentionPeriod,
+        app_settings::AppSettings, check_schedule::CheckSchedule, snapshot_group::SnapshotGroup,
+        snapshot_retention_period::SnapshotRetentionPeriod,
     },
     ui::{
         appimage_sources::build_appimage_sources_section,
@@ -47,8 +47,7 @@ pub fn show_settings_dialog(
     dialog.set_child(Some(&content_area));
 
     let updates_container = build_tab_container();
-    let (aur_enable_check, aur_combo, aur_devel_check) =
-        create_aur_group(settings, &updates_container);
+    let (aur_enable_check, aur_devel_check) = create_aur_group(settings, &updates_container);
     let flatpak_enable_check = create_flatpak_group(settings, &updates_container);
     let (min_update_age_spin, min_update_age_aur_only_check) =
         create_update_age_group(settings, &updates_container);
@@ -240,22 +239,11 @@ pub fn show_settings_dialog(
 
     content_area.append(&nav);
 
-    let aur_combo_for_enable = aur_combo.clone();
     let aur_devel_for_enable = aur_devel_check.clone();
     aur_enable_check.connect_toggled(move |check| {
         let is_active = check.is_active();
-        aur_combo_for_enable.set_sensitive(is_active);
-        update_devel_sensitivity(check, &aur_combo_for_enable, &aur_devel_for_enable);
+        update_devel_sensitivity(check, &aur_devel_for_enable);
         update_settings(move |s| s.enable_aur_support = is_active);
-    });
-
-    let aur_enable_for_combo = aur_enable_check.clone();
-    let aur_devel_for_combo = aur_devel_check.clone();
-    aur_combo.connect_selected_notify(move |combo| {
-        let value =
-            dropdown_active_id(combo).and_then(|id| if id == "auto" { None } else { Some(id) });
-        update_devel_sensitivity(&aur_enable_for_combo, combo, &aur_devel_for_combo);
-        update_settings(move |s| s.preferred_aur_helper = value);
     });
 
     aur_devel_check.connect_toggled(move |check| {
@@ -572,7 +560,7 @@ fn dropdown_set_active_id(dropdown: &gtk4::DropDown, id: &str) {
 fn create_aur_group(
     settings: &AppSettings,
     main_container: &gtk4::Box,
-) -> (gtk4::CheckButton, gtk4::DropDown, gtk4::CheckButton) {
+) -> (gtk4::CheckButton, gtk4::CheckButton) {
     let aur_section = create_preference_group(
         "AUR Package Manager",
         "Enable support for installing packages from the Arch User Repository (AUR).",
@@ -583,62 +571,23 @@ fn create_aur_group(
     aur_enable_check.set_active(settings.enable_aur_support);
     aur_section.append(&aur_enable_check);
 
-    let available_helpers = get_available_aur_helpers();
-    let mut aur_entries = vec![("auto".to_string(), "Auto-detect".to_string())];
-    for helper in &available_helpers {
-        aur_entries.push((helper.clone(), helper.clone()));
-    }
-    let aur_combo = build_id_dropdown(&aur_entries);
-    aur_combo.add_css_class("settings-combo");
-    aur_combo.set_margin_top(8);
-    dropdown_set_active_id(
-        &aur_combo,
-        settings.preferred_aur_helper.as_deref().unwrap_or("auto"),
-    );
-    aur_combo.set_sensitive(settings.enable_aur_support);
-    aur_section.append(&aur_combo);
-
     let devel_check = gtk4::CheckButton::with_label("Check development packages (devel mode)");
     devel_check.add_css_class("settings-check");
     devel_check.set_active(settings.enable_devel_aur);
     devel_check.set_margin_top(12);
-    update_devel_sensitivity(&aur_enable_check, &aur_combo, &devel_check);
+    update_devel_sensitivity(&aur_enable_check, &devel_check);
     aur_section.append(&devel_check);
 
     main_container.append(&aur_section);
 
-    return (aur_enable_check, aur_combo, devel_check);
+    return (aur_enable_check, devel_check);
 }
 
-fn aur_helper_for_selection(combo: &gtk4::DropDown) -> Option<String> {
-    let id = dropdown_active_id(combo).unwrap_or_else(|| "auto".to_string());
-    if id == "auto" {
-        return get_available_aur_helpers().into_iter().next();
-    }
-    return Some(id);
-}
-
-fn selection_supports_devel(combo: &gtk4::DropDown) -> bool {
-    return aur_helper_for_selection(combo)
-        .and_then(|name| AurManagers::from_command(&name))
-        .map(|manager| manager.supports_devel())
-        .unwrap_or(false);
-}
-
-fn update_devel_sensitivity(
-    enable_check: &gtk4::CheckButton,
-    combo: &gtk4::DropDown,
-    devel_check: &gtk4::CheckButton,
-) {
-    let supported = selection_supports_devel(combo);
-    devel_check.set_sensitive(enable_check.is_active() && supported);
-    if supported {
-        devel_check.set_tooltip_text(Some(
-            "Also check git, svn, and bzr packages for new commits, not just version bumps.",
-        ));
-    } else {
-        devel_check.set_tooltip_text(Some("The selected AUR helper does not support devel mode."));
-    }
+fn update_devel_sensitivity(enable_check: &gtk4::CheckButton, devel_check: &gtk4::CheckButton) {
+    devel_check.set_sensitive(enable_check.is_active());
+    devel_check.set_tooltip_text(Some(
+        "Also check git, svn, and bzr packages for new commits, not just version bumps.",
+    ));
 }
 
 fn create_show_descriptions_group(
@@ -1527,15 +1476,7 @@ fn install_settings_css() {
 
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
-            ".settings-card {
-                background-color: alpha(currentColor, 0.05);
-                border: 1px solid alpha(currentColor, 0.08);
-                border-radius: 12px;
-                padding: 16px;
-            }
-            .settings-sidebar {
-                background-color: alpha(currentColor, 0.05);
-            }",
+            ".settings-card {                background-color: alpha(currentColor, 0.05);                border: 1px solid alpha(currentColor, 0.08);                border-radius: 12px;                padding: 16px;            }            .settings-sidebar {                background-color: alpha(currentColor, 0.05);            }",
         );
 
         gtk4::style_context_add_provider_for_display(

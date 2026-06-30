@@ -1,5 +1,6 @@
 #[derive(Debug)]
 pub struct AurInfo {
+    pub version: Option<String>,
     pub description: Option<String>,
     pub url: Option<String>,
     pub last_modified: Option<i64>,

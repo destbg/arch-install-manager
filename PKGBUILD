@@ -1,18 +1,15 @@
-pkgname=arch-update-manager
+pkgname=arch-install-manager
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="A Linux Mint inspired GTK4-based update manager for Arch Linux"
+pkgdesc="A Linux Mint inspired GTK4-based install and update manager for Arch Linux"
 arch=('x86_64')
-url="https://github.com/destbg/arch-update-manager"
+url="https://github.com/destbg/arch-install-manager"
 license=('MIT')
-depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'expect' 'sudo' 'curl')
-provides=('arch-update-manager')
-conflicts=('arch-update-manager')
+depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
+provides=('arch-install-manager')
+conflicts=('arch-install-manager')
 makedepends=('cargo' 'git')
-optdepends=('paru: AUR helper support'
-            'yay: AUR helper support'
-            'shelly: AUR helper support'
-            'flatpak: Flatpak package support'
+optdepends=('flatpak: Flatpak package support'
             'meld: visual diff editor for pacnew files'
             'timeshift: pre-update system snapshots'
             'snapper: pre-update Btrfs snapshots'
@@ -36,28 +33,30 @@ build() {
 
 package() {
 	cd "$pkgname"
-	
-	install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
-	install -Dm755 "target/release/$pkgname-tray" "$pkgdir/usr/bin/$pkgname-tray"
-	install -Dm755 "target/release/$pkgname-check" "$pkgdir/usr/bin/$pkgname-check"
 
-	install -Dm644 "$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+	for bin in daim daim-gui daim-helper daim-tray daim-check; do
+		install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
+	done
 
-	install -Dm644 "com.destbg.$pkgname.policy" "$pkgdir/usr/share/polkit-1/actions/com.destbg.$pkgname.policy"
+	install -Dm644 "arch-install-manager.desktop" \
+		"$pkgdir/usr/share/applications/arch-install-manager.desktop"
 
-	install -Dm644 "res/systemd/$pkgname-check.service" \
-		"$pkgdir/usr/lib/systemd/user/$pkgname-check.service"
-	install -Dm644 "res/systemd/$pkgname-check.timer" \
-		"$pkgdir/usr/lib/systemd/user/$pkgname-check.timer"
-	install -Dm644 "res/systemd/$pkgname-tray.service" \
-		"$pkgdir/usr/lib/systemd/user/$pkgname-tray.service"
-	
+	install -Dm644 "com.destbg.arch-install-manager.policy" \
+		"$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
+
+	install -Dm644 "res/systemd/daim-check.service" \
+		"$pkgdir/usr/lib/systemd/system/daim-check.service"
+	install -Dm644 "res/systemd/daim-check.timer" \
+		"$pkgdir/usr/lib/systemd/system/daim-check.timer"
+	install -Dm644 "res/systemd/daim-tray.service" \
+		"$pkgdir/usr/lib/systemd/user/daim-tray.service"
+
 	for size in 48x48 256x256 512x512; do
-		if [ -f "icons/$size/apps/$pkgname.png" ]; then
-			install -Dm644 "icons/$size/apps/$pkgname.png" \
-				"$pkgdir/usr/share/icons/hicolor/$size/apps/$pkgname.png"
+		if [ -f "icons/$size/apps/arch-install-manager.png" ]; then
+			install -Dm644 "icons/$size/apps/arch-install-manager.png" \
+				"$pkgdir/usr/share/icons/hicolor/$size/apps/arch-install-manager.png"
 		fi
 	done
-	
+
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

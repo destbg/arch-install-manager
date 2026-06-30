@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Arch Install Manager
+Comment=A GTK4-based install and update manager for Arch Linux
+Exec=daim-gui
+Icon=arch-install-manager
+Terminal=false
+Categories=System;PackageManager;
+Keywords=arch;install;update;manager;pacman;aur;system;

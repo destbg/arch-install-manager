@@ -1,7 +1,6 @@
 use glib::clone;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Frame, Label, Orientation};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use vte4::prelude::*;
@@ -192,20 +191,15 @@ where
     button_row.set_margin_top(8);
     button_row.set_margin_bottom(12);
 
-    let close_btn = Button::with_label("Close");
+    let close_btn = Button::with_label("Cancel");
     close_btn.add_css_class("suggested-action");
-    close_btn.set_sensitive(false);
     button_row.append(&close_btn);
 
     content_area.append(&button_row);
 
-    let done_flag = Rc::new(RefCell::new(false));
-
     let title_for_exit = title_label.clone();
     let close_for_exit = close_btn.clone();
-    let done_for_exit = done_flag.clone();
     terminal.connect_child_exited(move |term, exit_status| {
-        *done_for_exit.borrow_mut() = true;
         log_info!("dialog terminal command exited: status={}", exit_status);
         capture_terminal_output(term, "dialog");
         if exit_status == 0 {
@@ -213,7 +207,7 @@ where
         } else {
             title_for_exit.set_text(&format!("Command failed (exit {})", exit_status));
         }
-        close_for_exit.set_sensitive(true);
+        close_for_exit.set_label("Close");
     });
 
     let dialog_for_close_btn = dialog.clone();
@@ -222,13 +216,8 @@ where
     });
 
     let on_finished_rc: Rc<dyn Fn()> = Rc::new(on_finished);
-    let done_for_request = done_flag.clone();
-    let on_finished_for_request = on_finished_rc.clone();
     dialog.connect_close_request(move |_| {
-        if !*done_for_request.borrow() {
-            return glib::Propagation::Stop;
-        }
-        on_finished_for_request();
+        on_finished_rc();
         return glib::Propagation::Proceed;
     });
 
@@ -287,8 +276,8 @@ fn fire_update_failed_notification(exit_status: i32) {
                 "The update command exited with status {}.",
                 exit_status
             ))
-            .icon("arch-update-manager")
-            .appname("Arch Update Manager")
+            .icon("arch-install-manager")
+            .appname("Arch Install Manager")
             .show();
 
         if let Err(e) = result {

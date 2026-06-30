@@ -65,7 +65,7 @@ pub fn cleanup_timeshift_snapshots(
             if let Ok(snapshot_time) = parse_snapshot_timestamp(name) {
                 snapshot_time >= cutoff
             } else {
-                true // Keep snapshots we can't parse
+                true
             }
         });
     }
@@ -94,7 +94,6 @@ pub fn cleanup_timeshift_snapshots(
 }
 
 fn parse_snapshot_timestamp(snapshot_name: &str) -> Result<DateTime<Local>> {
-    // Parse snapshot name format: YYYY-MM-DD_HH-MM-SS
     let re =
         Regex::new(r"([0-9]{4})-([0-9]{2})-([0-9]{2})_([0-9]{2})-([0-9]{2})-([0-9]{2})").unwrap();
 

@@ -327,16 +327,7 @@ fn attach_deselect_gesture(
 fn create_favorite_column(column_view: &ColumnView) {
     let css = gtk4::CssProvider::new();
     css.load_from_data(
-        "button.favorite-star,
-         button.favorite-star:checked {
-             background-color: transparent;
-             box-shadow: none;
-         }
-         button.favorite-star:hover,
-         button.favorite-star:checked:hover {
-             background-color: alpha(currentColor, 0.08);
-             box-shadow: none;
-         }",
+        "button.favorite-star,         button.favorite-star:checked {             background-color: transparent;             box-shadow: none;         }         button.favorite-star:hover,         button.favorite-star:checked:hover {             background-color: alpha(currentColor, 0.08);             box-shadow: none;         }",
     );
     if let Some(display) = gtk4::gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(

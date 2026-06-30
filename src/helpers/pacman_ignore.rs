@@ -3,8 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const PACMAN_CONF: &str = "/etc/pacman.conf";
-const MARKER_BEGIN: &str = "# arch-update-manager managed begin - do not edit";
-const MARKER_END: &str = "# arch-update-manager managed end";
+const MARKER_BEGIN: &str = "# arch-install-manager managed begin - do not edit";
+const MARKER_END: &str = "# arch-install-manager managed end";
 
 pub fn list_managed_ignores() -> Vec<String> {
     let Ok(content) = fs::read_to_string(PACMAN_CONF) else {
@@ -143,7 +143,7 @@ fn insert_block_at_end_of_options(lines: &mut Vec<String>, block: Vec<String>) {
 fn write_pacman_conf(content: &str) -> Result<()> {
     let target = Path::new(PACMAN_CONF);
     let parent = target.parent().unwrap_or_else(|| Path::new("/"));
-    let tmp: PathBuf = parent.join(".pacman.conf.arch-update-manager.tmp");
+    let tmp: PathBuf = parent.join(".pacman.conf.arch-install-manager.tmp");
 
     fs::write(&tmp, content).with_context(|| format!("Failed to write {}", tmp.display()))?;
     fs::rename(&tmp, target).with_context(|| format!("Failed to replace {}", target.display()))?;

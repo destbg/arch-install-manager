@@ -5,10 +5,10 @@ use std::process::Command;
 use crate::helpers::elevated::{chown_to_user, get_original_user};
 use crate::models::check_schedule::CheckSchedule;
 
-const LEGACY_AUTOSTART_FILENAME: &str = "arch-update-manager-tray.desktop";
-const TIMER_UNIT: &str = "arch-update-manager-check.timer";
-const CHECK_SERVICE: &str = "arch-update-manager-check.service";
-const TRAY_SERVICE: &str = "arch-update-manager-tray.service";
+const LEGACY_AUTOSTART_FILENAME: &str = "daim-tray.desktop";
+const TIMER_UNIT: &str = "daim-check.timer";
+const CHECK_SERVICE: &str = "daim-check.service";
+const TRAY_SERVICE: &str = "daim-tray.service";
 
 pub fn trigger_check_service() {
     std::thread::spawn(|| {
@@ -18,7 +18,7 @@ pub fn trigger_check_service() {
 
 pub fn kick_tray() {
     let _ = Command::new("pkill")
-        .args(["-USR1", "-f", "arch-update-manager-tray"])
+        .args(["-USR1", "-f", "daim-tray"])
         .status();
 }
 

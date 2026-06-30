@@ -3,6 +3,8 @@ use regex::Regex;
 use std::path::Path;
 use std::process::Command;
 
+use crate::ipc::client;
+use crate::ipc::protocol::{Op, Response};
 use crate::models::cache_candidates::CacheCandidates;
 use crate::models::paccache_dry_result::PaccacheDryResult;
 use crate::models::service_restart_outcome::ServiceRestartOutcome;
@@ -142,26 +144,36 @@ pub fn get_services_needing_restart() -> Result<Vec<String>> {
 }
 
 pub fn restart_service(service: &str) -> ServiceRestartOutcome {
-    let output = Command::new("systemctl")
-        .args(&["restart", service])
-        .output();
-
-    return match output {
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&o.stdout).to_string();
-            ServiceRestartOutcome {
-                success: o.status.success(),
-                exit_code: o.status.code(),
-                stdout,
-                stderr,
-            }
-        }
+    return match client::call(Op::RestartService {
+        name: service.to_string(),
+    }) {
+        Ok(Response::Done {
+            exit_code,
+            stdout,
+            stderr,
+        }) => ServiceRestartOutcome {
+            success: exit_code == 0,
+            exit_code: Some(exit_code),
+            stdout,
+            stderr,
+        },
+        Ok(Response::Error { message }) => ServiceRestartOutcome {
+            success: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: message,
+        },
+        Ok(_) => ServiceRestartOutcome {
+            success: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: "unexpected helper response".to_string(),
+        },
         Err(e) => ServiceRestartOutcome {
             success: false,
             exit_code: None,
             stdout: String::new(),
-            stderr: format!("Could not run systemctl: {}", e),
+            stderr: format!("Could not reach daim-helper: {}", e),
         },
     };
 }
@@ -191,25 +203,15 @@ pub fn is_kernel_reboot_pending() -> bool {
 }
 
 pub fn clean_cache(keep_old: u32, keep_uninstalled: u32) -> Result<()> {
-    let keep_old_arg = format!("-k{}", keep_old);
-    let old_status = Command::new("paccache")
-        .args(["-r", &keep_old_arg])
-        .status()?;
-    if !old_status.success() {
-        return Err(anyhow::anyhow!("paccache failed to remove old packages"));
+    let resp = client::call(Op::PaccacheClean {
+        keep: keep_old,
+        keep_uninstalled,
+    })
+    .map_err(|e| anyhow::anyhow!("could not reach daim-helper: {}", e))?;
+    if resp.is_success() {
+        return Ok(());
     }
-
-    let keep_uninstalled_arg = format!("-k{}", keep_uninstalled);
-    let uninstalled_status = Command::new("paccache")
-        .args(["-r", "-u", &keep_uninstalled_arg])
-        .status()?;
-    if !uninstalled_status.success() {
-        return Err(anyhow::anyhow!(
-            "paccache failed to remove uninstalled packages"
-        ));
-    }
-
-    return Ok(());
+    return Err(anyhow::anyhow!("paccache failed via daim-helper"));
 }
 
 fn extract_service_name(line: &str) -> Option<String> {

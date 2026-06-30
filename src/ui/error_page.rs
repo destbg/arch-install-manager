@@ -2,8 +2,10 @@ use glib::clone;
 use gtk4::prelude::*;
 use gtk4::{Box as GtkBox, Button, Image, Label, Orientation, ScrolledWindow, TextView};
 
-use crate::helpers::database_lock::{is_lock_error, remove_database_lock};
+use crate::helpers::database_lock::is_lock_error;
 use crate::helpers::get_navigation_stack::get_navigation_stack;
+use crate::ipc::client;
+use crate::ipc::protocol::{Op, Response};
 use crate::ui::dialogs::show_error_dialog;
 use crate::ui::main_window::load_packages;
 
@@ -106,8 +108,9 @@ fn handle_retry_click(error_box: &GtkBox) {
 }
 
 fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: &Button) {
-    match remove_database_lock() {
-        Ok(()) => {
+    let _ = client::attach_session();
+    match client::call(Op::RemoveDbLock) {
+        Ok(ref resp) if resp.is_success() => {
             remove_lock_btn.set_visible(false);
 
             if let Some((stack, content_box, window)) = get_navigation_stack(error_box) {
@@ -115,7 +118,13 @@ fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: 
                 load_packages(stack, content_box, window);
             }
         }
-        Err(error_msg) => {
+        other => {
+            let error_msg = match other {
+                Ok(Response::Error { message }) => message,
+                Ok(Response::Done { stderr, .. }) if !stderr.is_empty() => stderr,
+                Ok(_) => "the helper reported a failure".to_string(),
+                Err(e) => e.to_string(),
+            };
             if let Some((_, _, window)) = get_navigation_stack(error_box) {
                 show_error_dialog(
                     window.upcast_ref::<gtk4::Window>(),

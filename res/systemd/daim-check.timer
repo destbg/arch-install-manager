@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic check for pending Arch updates (arch-install-manager)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=daim-check.service
+
+[Install]
+WantedBy=timers.target

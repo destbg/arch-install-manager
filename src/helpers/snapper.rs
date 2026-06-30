@@ -17,6 +17,5 @@ pub fn is_snap_pac_installed() -> bool {
 }
 
 pub fn build_snapper_snapshot_command() -> String {
-    return "sudo snapper -c root create --type single --description \"arch-update-manager\""
-        .to_string();
+    return "daim snapshot-snapper arch-install-manager".to_string();
 }

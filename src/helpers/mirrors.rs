@@ -18,17 +18,11 @@ pub fn is_mirrorlist_stale() -> bool {
 
 pub fn mirror_refresh_command() -> Option<String> {
     if is_command_available("rate-mirrors") {
-        return Some(format!(
-            "cp {file} {file}.bak && rate-mirrors --save={file} --allow-root --protocol https arch",
-            file = MIRRORLIST
-        ));
+        return Some("daim refresh-mirrors rate-mirrors".to_string());
     }
 
     if is_command_available("reflector") {
-        return Some(format!(
-            "cp {file} {file}.bak && reflector --save {file} --protocol https --latest 20 --sort rate",
-            file = MIRRORLIST
-        ));
+        return Some("daim refresh-mirrors reflector".to_string());
     }
 
     return None;

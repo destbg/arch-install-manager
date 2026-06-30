@@ -3,13 +3,10 @@ use crate::helpers::decorations::are_decorations_disabled;
 use crate::helpers::elevated::open_url_as_user;
 use crate::helpers::mirrors::{is_mirrorlist_stale, mirror_refresh_command, mirrorlist_age_days};
 use crate::helpers::package_updates::get_package_updates;
-use crate::helpers::pacman_ignore::{
-    add_to_ignore_pkg, is_in_managed_ignore_pkg, list_managed_ignores, remove_from_ignore_pkg,
-};
+use crate::helpers::pacman_ignore::{is_in_managed_ignore_pkg, list_managed_ignores};
 use crate::helpers::release_notes::release_notes_url;
 use crate::helpers::settings::{load_settings, save_settings};
-use crate::helpers::tray_integration::{kick_tray, trigger_check_service};
-use crate::helpers::tray_state::{build_tray_state, write_tray_state};
+use crate::helpers::tray_integration::trigger_check_service;
 use crate::helpers::unselected_packages::load_unselected_packages;
 use crate::log_info;
 use crate::models::info_panel::InfoPanel;
@@ -38,7 +35,7 @@ use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Button, ColumnView, ColumnViewColumn,
     FilterListModel, HeaderBar, Orientation, Paned, ScrolledWindow, SearchBar, SearchEntry,
-    Separator, SingleSelection, SortListModel, Stack,
+    Separator, SingleSelection, SortListModel, Stack, StackSwitcher,
 };
 use std::cell::RefCell;
 
@@ -49,16 +46,15 @@ thread_local! {
 pub fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("Arch Update Manager")
-        .icon_name("arch-update-manager")
-        .default_width(900)
-        .default_height(600)
+        .title("Arch Install Manager")
+        .icon_name("arch-install-manager")
+        .default_width(960)
+        .default_height(620)
         .build();
 
     let decorations_disabled = are_decorations_disabled();
 
     let header_bar = HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Arch Update Manager"))));
 
     if !decorations_disabled {
         let settings_button = Button::from_icon_name("preferences-system-symbolic");
@@ -136,6 +132,14 @@ pub fn build_ui(app: &Application) {
 
     let content_box = create_main_content(decorations_disabled, &stack, &window);
     stack.add_named(&content_box, Some("content"));
+
+    if let Some(view_stack) = content_box.first_child().and_downcast::<Stack>() {
+        install_tabs_css();
+        let switcher = StackSwitcher::new();
+        switcher.add_css_class("daim-tabs");
+        switcher.set_stack(Some(&view_stack));
+        header_bar.pack_start(&switcher);
+    }
 
     main_box.append(&stack);
 
@@ -262,12 +266,7 @@ fn install_mirror_banner_css() {
 
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
-            ".mirror-banner {
-                background-color: alpha(currentColor, 0.05);
-                border: 1px solid alpha(currentColor, 0.1);
-                border-radius: 12px;
-                padding: 8px 12px;
-            }",
+            ".mirror-banner {                background-color: alpha(currentColor, 0.05);                border: 1px solid alpha(currentColor, 0.1);                border-radius: 12px;                padding: 8px 12px;            }",
         );
 
         gtk4::style_context_add_provider_for_display(
@@ -278,7 +277,50 @@ fn install_mirror_banner_css() {
     });
 }
 
-fn create_main_content(
+fn install_tabs_css() {
+    use std::sync::OnceLock;
+    static CSS_INSTALLED: OnceLock<()> = OnceLock::new();
+
+    CSS_INSTALLED.get_or_init(|| {
+        let Some(display) = gtk4::gdk::Display::default() else {
+            return;
+        };
+
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_data(
+            ".daim-tabs { padding: 0; background: transparent; }\
+             .daim-tabs > button {\
+                 border: none;\
+                 border-radius: 8px;\
+                 box-shadow: none;\
+                 outline: none;\
+                 background: transparent;\
+                 margin: 0 2px;\
+                 padding: 4px 0px;\
+                 min-height: 0;\
+                 font-weight: normal;\
+                 color: alpha(currentColor, 0.7);\
+             }\
+             .daim-tabs > button:hover {\
+                 background: alpha(currentColor, 0.07);\
+                 color: currentColor;\
+             }\
+             .daim-tabs > button:checked {\
+                 background: alpha(currentColor, 0.13);\
+                 color: currentColor;\
+                 font-weight: bold;\
+             }",
+        );
+
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    });
+}
+
+fn build_update_tab(
     decorations_disabled: bool,
     stack: &Stack,
     window: &ApplicationWindow,
@@ -477,6 +519,236 @@ fn create_main_content(
     return content_box;
 }
 
+fn create_main_content(
+    decorations_disabled: bool,
+    stack: &Stack,
+    window: &ApplicationWindow,
+) -> GtkBox {
+    let content_box = GtkBox::new(Orientation::Vertical, 0);
+
+    let view_stack = Stack::new();
+    view_stack.set_vexpand(true);
+    view_stack.add_titled(&build_install_tab(window), Some("install"), "Install");
+    view_stack.add_titled(
+        &build_update_tab(decorations_disabled, stack, window),
+        Some("update"),
+        "Update",
+    );
+    view_stack.add_titled(&build_manage_tab(window), Some("manage"), "Manage");
+    view_stack.set_visible_child_name("update");
+
+    content_box.append(&view_stack);
+    return content_box;
+}
+
+pub fn update_layout(content_box: &GtkBox) -> Option<GtkBox> {
+    let view_stack = content_box.first_child().and_downcast::<Stack>()?;
+    return view_stack.child_by_name("update").and_downcast::<GtkBox>();
+}
+
+fn collect_selected_names(store: &ListStore) -> Vec<String> {
+    let mut names = Vec::new();
+    for i in 0..store.n_items() {
+        if let Some(obj) = store.item(i).and_downcast::<PackageUpdateObject>() {
+            let data = obj.data();
+            if data.selected {
+                names.push(data.name);
+            }
+        }
+    }
+    return names;
+}
+
+fn set_list_column_titles(column_view: &ColumnView, action: &str, size: &str) {
+    let columns = column_view.columns();
+    if let Some(col) = columns.item(2).and_downcast::<ColumnViewColumn>() {
+        col.set_title(Some(action));
+    }
+    if let Some(col) = columns.item(5).and_downcast::<ColumnViewColumn>() {
+        col.set_title(Some(size));
+    }
+}
+
+fn bottom_bar(statusbar: &gtk4::Label) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.set_margin_start(8);
+    row.set_margin_end(8);
+    row.set_margin_top(6);
+    row.set_margin_bottom(6);
+    statusbar.set_hexpand(true);
+    row.append(statusbar);
+    return row;
+}
+
+fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
+    let tab = GtkBox::new(Orientation::Vertical, 0);
+
+    let search_entry = SearchEntry::new();
+    search_entry.set_placeholder_text(Some(
+        "Search the repositories and the AUR, then press Enter",
+    ));
+    search_entry.set_hexpand(true);
+    search_entry.set_margin_start(8);
+    search_entry.set_margin_end(8);
+    search_entry.set_margin_top(8);
+    search_entry.set_margin_bottom(8);
+    tab.append(&search_entry);
+
+    let (list_view, store, statusbar, _filter) = create_package_list(&search_entry);
+    set_list_column_titles(&list_view, "Install", "Size");
+    let scrolled = ScrolledWindow::builder()
+        .vexpand(true)
+        .child(&list_view)
+        .build();
+    tab.append(&scrolled);
+
+    let bottom = bottom_bar(&statusbar);
+    let install_btn = Button::with_label("Install Selected");
+    install_btn.add_css_class("suggested-action");
+    bottom.append(&install_btn);
+    tab.append(&bottom);
+
+    let store_for_search = store.clone();
+    search_entry.connect_activate(move |entry| {
+        let query = entry.text().to_string();
+        let store = store_for_search.clone();
+        glib::spawn_future_local(async move {
+            let results =
+                gio::spawn_blocking(move || crate::helpers::search::search_packages(&query))
+                    .await
+                    .unwrap_or_default();
+            store.remove_all();
+            for pkg in results {
+                store.append(&PackageUpdateObject::new(pkg));
+            }
+        });
+    });
+
+    let store_for_install = store.clone();
+    let window_for_install = window.clone();
+    install_btn.connect_clicked(move |_| {
+        let names = collect_selected_names(&store_for_install);
+        if names.is_empty() {
+            return;
+        }
+        let _ = crate::ipc::client::attach_session();
+        let command = format!("daim install {}", names.join(" "));
+        let store_refresh = store_for_install.clone();
+        run_command_in_dialog(
+            window_for_install.upcast_ref::<gtk4::Window>(),
+            &command,
+            move || {
+                store_refresh.remove_all();
+            },
+        );
+    });
+
+    return tab;
+}
+
+fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
+    let tab = GtkBox::new(Orientation::Vertical, 0);
+
+    let search_entry = SearchEntry::new();
+    search_entry.set_placeholder_text(Some("Filter installed packages"));
+    search_entry.set_hexpand(true);
+    search_entry.set_margin_start(8);
+    search_entry.set_margin_end(8);
+    search_entry.set_margin_top(8);
+    search_entry.set_margin_bottom(8);
+    tab.append(&search_entry);
+
+    let (list_view, store, statusbar, _filter) = create_package_list(&search_entry);
+    set_list_column_titles(&list_view, "Select", "Size");
+    let scrolled = ScrolledWindow::builder()
+        .vexpand(true)
+        .child(&list_view)
+        .build();
+    tab.append(&scrolled);
+
+    let bottom = bottom_bar(&statusbar);
+    let remove_btn = Button::with_label("Remove Selected");
+    remove_btn.add_css_class("destructive-action");
+    let orphans_btn = Button::with_label("Remove Orphans");
+    let cache_btn = Button::with_label("Clean Cache");
+    bottom.append(&remove_btn);
+    bottom.append(&orphans_btn);
+    bottom.append(&cache_btn);
+    tab.append(&bottom);
+
+    let store_pop = store.clone();
+    let populate: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
+        let store = store_pop.clone();
+        glib::spawn_future_local(async move {
+            let packages =
+                gio::spawn_blocking(crate::helpers::installed_packages::get_installed_packages)
+                    .await
+                    .unwrap_or_default();
+            store.remove_all();
+            for pkg in packages {
+                store.append(&PackageUpdateObject::new(pkg));
+            }
+        });
+    });
+    populate();
+
+    wire_manage_action(
+        &remove_btn,
+        window,
+        &store,
+        &populate,
+        std::rc::Rc::new(|names: &[String]| format!("daim remove {}", names.join(" "))),
+    );
+
+    let window_for_orphans = window.clone();
+    let populate_for_orphans = populate.clone();
+    orphans_btn.connect_clicked(move |_| {
+        let _ = crate::ipc::client::attach_session();
+        let populate = populate_for_orphans.clone();
+        run_command_in_dialog(
+            window_for_orphans.upcast_ref::<gtk4::Window>(),
+            "orphans=$(pacman -Qtdq); if [ -n \"$orphans\" ]; then daim remove --cascade $orphans; else echo 'No orphan packages found.'; fi",
+            move || populate(),
+        );
+    });
+
+    let window_for_cache = window.clone();
+    cache_btn.connect_clicked(move |_| {
+        let _ = crate::ipc::client::attach_session();
+        run_command_in_dialog(
+            window_for_cache.upcast_ref::<gtk4::Window>(),
+            "daim paccache --keep 3",
+            || {},
+        );
+    });
+
+    return tab;
+}
+
+fn wire_manage_action(
+    button: &Button,
+    window: &ApplicationWindow,
+    store: &ListStore,
+    populate: &std::rc::Rc<dyn Fn()>,
+    build_command: std::rc::Rc<dyn Fn(&[String]) -> String>,
+) {
+    let store = store.clone();
+    let window = window.clone();
+    let populate = populate.clone();
+    button.connect_clicked(move |_| {
+        let names = collect_selected_names(&store);
+        if names.is_empty() {
+            return;
+        }
+        let _ = crate::ipc::client::attach_session();
+        let command = build_command(&names);
+        let populate = populate.clone();
+        run_command_in_dialog(window.upcast_ref::<gtk4::Window>(), &command, move || {
+            populate()
+        });
+    });
+}
+
 fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWindow) {
     let stack = stack.clone();
     let window = window.clone();
@@ -531,13 +803,10 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
                 pkg_d,
                 if target_state { "added" } else { "removed" }
             );
-            let result = if target_state {
-                add_to_ignore_pkg(&pkg_d)
-            } else {
-                remove_from_ignore_pkg(&pkg_d)
-            };
+            let _ = crate::ipc::client::attach_session();
+            let result = crate::ipc::client::set_ignore_pkg(&pkg_d, target_state);
             match result {
-                Ok(()) => {
+                Ok(ref resp) if resp.is_success() => {
                     update_ignore_button_tooltip(&btn_d);
                     trigger_check_service();
                     if let Some(content_box) =
@@ -547,12 +816,13 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
                         load_packages(stack_d.clone(), content_box, window_d.clone());
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to update pacman.conf IgnorePkg: {}", e);
+                other => {
+                    let msg = ignore_error_message(other);
+                    eprintln!("Failed to update pacman.conf IgnorePkg: {}", msg);
                     show_error_dialog(
                         window_d.upcast_ref::<gtk4::Window>(),
                         "Failed to update pacman.conf",
-                        &format!("{}", e),
+                        &msg,
                     );
                     revert_toggle(&btn_d, &handler_id_cell_d, !target_state);
                 }
@@ -561,6 +831,16 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
     });
 
     *panel.ignore_handler_id.borrow_mut() = Some(handler_id);
+}
+
+fn ignore_error_message(result: std::io::Result<crate::ipc::protocol::Response>) -> String {
+    use crate::ipc::protocol::Response;
+    return match result {
+        Ok(Response::Error { message }) => message,
+        Ok(Response::Done { stderr, .. }) if !stderr.is_empty() => stderr,
+        Ok(_) => "the helper reported a failure".to_string(),
+        Err(e) => e.to_string(),
+    };
 }
 
 fn revert_toggle(
@@ -617,7 +897,8 @@ fn find_column(window: &ApplicationWindow, index: u32) -> Option<ColumnViewColum
     let main_box = window.child().and_downcast::<GtkBox>()?;
     let stack = main_box.first_child().and_downcast::<Stack>()?;
     let content_box = stack.child_by_name("content").and_downcast::<GtkBox>()?;
-    let paned = content_box
+    let update = update_layout(&content_box)?;
+    let paned = update
         .last_child()
         .and_then(|c| c.prev_sibling())
         .and_downcast::<Paned>()?;
@@ -633,7 +914,8 @@ pub fn find_package_store(window: &ApplicationWindow) -> Option<ListStore> {
     let main_box = window.child().and_downcast::<GtkBox>()?;
     let stack = main_box.first_child().and_downcast::<Stack>()?;
     let content_box = stack.child_by_name("content").and_downcast::<GtkBox>()?;
-    let paned = content_box
+    let update = update_layout(&content_box)?;
+    let paned = update
         .last_child()
         .and_then(|c| c.prev_sibling())
         .and_downcast::<Paned>()?;
@@ -648,15 +930,6 @@ fn extract_list_store(column_view: &ColumnView) -> Option<ListStore> {
     let filter_model = single.model()?.downcast::<FilterListModel>().ok()?;
     let sort_model = filter_model.model()?.downcast::<SortListModel>().ok()?;
     return sort_model.model().and_downcast::<ListStore>();
-}
-
-fn publish_tray_state(packages: &[crate::models::package_update::PackageUpdate]) {
-    let state = build_tray_state(packages);
-    if let Err(e) = write_tray_state(&state) {
-        eprintln!("Failed to write tray state: {}", e);
-        return;
-    }
-    kick_tray();
 }
 
 pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindow) {
@@ -686,13 +959,17 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                     });
                 }
 
-                publish_tray_state(&packages);
                 if packages.is_empty() {
                     stack.set_visible_child_name("no-updates");
                     return;
                 }
 
-                let paned = content_box
+                let Some(update) = update_layout(&content_box) else {
+                    eprintln!("Could not find update layout");
+                    return;
+                };
+
+                let paned = update
                     .last_child()
                     .and_then(|child| child.prev_sibling())
                     .and_downcast::<Paned>();
@@ -744,7 +1021,7 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                     list_store.append(&PackageUpdateObject::new(package));
                 }
 
-                if let Some(statusbar) = content_box.last_child().and_downcast::<gtk4::Label>() {
+                if let Some(statusbar) = update.last_child().and_downcast::<gtk4::Label>() {
                     update_statusbar(&statusbar, &list_store);
                 }
 

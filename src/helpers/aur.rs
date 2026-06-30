@@ -2,53 +2,15 @@ use crate::{
     helpers::aur_maintainers::{read_maintainers, write_maintainers},
     helpers::aur_pkgbuild::pkgbuild_needs_review,
     helpers::aur_scan::enrich_with_aur_scan,
-    helpers::elevated::get_original_user,
     helpers::network::http_get,
-    helpers::settings::{get_effective_aur_helper, load_settings},
-    models::{
-        aur_info::AurInfo, aur_managers::AurManagers, package_source::PackageSource,
-        package_update::PackageUpdate, shelly_update::ShellyUpdate,
-    },
+    models::{aur_info::AurInfo, package_source::PackageSource, package_update::PackageUpdate},
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::process::Command;
 
 const AUR_RPC_TIMEOUT_SECS: u32 = 5;
-
-pub fn detect_aur_helper() -> Option<AurManagers> {
-    let settings = load_settings();
-
-    if let Some(helper_name) = get_effective_aur_helper(&settings) {
-        if let Some(helper) = AurManagers::from_command(&helper_name) {
-            return Some(helper);
-        }
-    }
-
-    let helpers = [
-        AurManagers::Yay,
-        AurManagers::Paru,
-        AurManagers::Trizen,
-        AurManagers::Pikaur,
-        AurManagers::Shelly,
-        AurManagers::PamacCli,
-    ];
-
-    for helper in &helpers {
-        if !is_command_available(helper.command()) {
-            continue;
-        }
-        if matches!(helper, AurManagers::PamacCli) && !pamac_supports_aur() {
-            continue;
-        }
-        if matches!(helper, AurManagers::Shelly) && !shelly_supports_aur() {
-            continue;
-        }
-        return Some(helper.clone());
-    }
-
-    return None;
-}
 
 pub fn is_command_available(command: &str) -> bool {
     return Command::new("which")
@@ -58,71 +20,83 @@ pub fn is_command_available(command: &str) -> bool {
         .unwrap_or(false);
 }
 
-pub fn shelly_supports_aur() -> bool {
-    let Ok(output) = Command::new("shelly")
-        .args(["config", "get", "AurEnabled"])
-        .output()
-    else {
-        return false;
+pub fn list_foreign_packages() -> Vec<(String, String)> {
+    let Ok(output) = Command::new("pacman").args(["-Qm"]).output() else {
+        return Vec::new();
     };
     if !output.status.success() {
-        return false;
+        return Vec::new();
     }
-    return String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .eq_ignore_ascii_case("true");
-}
-
-pub fn pamac_supports_aur() -> bool {
-    let Ok(output) = Command::new("pamac").args(["list", "--help"]).output() else {
-        return false;
-    };
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    return combined.contains("--aur") || combined.contains(" -a,");
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut result = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        if let (Some(name), Some(version)) = (parts.next(), parts.next()) {
+            result.push((name.to_string(), version.to_string()));
+        }
+    }
+    return result;
 }
 
 pub fn get_aur_updates() -> Result<Vec<PackageUpdate>> {
-    let Some(helper) = detect_aur_helper() else {
+    let foreign = list_foreign_packages();
+    if foreign.is_empty() {
         return Ok(Vec::new());
-    };
-
-    let settings = load_settings();
-    let mut args = helper.update_check_args();
-    if settings.enable_devel_aur {
-        args.extend(helper.devel_args());
     }
 
-    let output = Command::new(helper.command())
-        .args(&args)
-        .output()
-        .context(format!(
-            "Failed to run {} for AUR updates",
-            helper.command()
-        ))?;
+    let names: Vec<&str> = foreign.iter().map(|(name, _)| name.as_str()).collect();
+    let info_map = fetch_aur_info(&names);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("nothing to do")
-            || stderr.contains("no packages")
-            || output.stdout.is_empty()
-        {
-            return Ok(Vec::new());
+    let mut updates = Vec::new();
+    for (name, installed_version) in &foreign {
+        let Some(info) = info_map.get(name) else {
+            continue;
+        };
+        let Some(aur_version) = info.version.as_deref() else {
+            continue;
+        };
+        if alpm::vercmp(aur_version, installed_version.as_str()) != Ordering::Greater {
+            continue;
         }
-        return Err(anyhow::anyhow!("AUR helper failed: {}", stderr));
+        updates.push(new_aur_update(name, installed_version, aur_version));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut updates = parse_aur_updates(&stdout, &helper)?;
     enrich_with_aur_info(&mut updates);
     for update in &mut updates {
         update.pkgbuild_needs_review = pkgbuild_needs_review(&update.name);
     }
     enrich_with_aur_scan(&mut updates);
     return Ok(updates);
+}
+
+fn new_aur_update(name: &str, current_version: &str, new_version: &str) -> PackageUpdate {
+    return PackageUpdate {
+        source: PackageSource::Aur,
+        repository: PackageSource::Aur.label().to_string(),
+        selected: true,
+        name: name.to_string(),
+        description: format!("AUR package: {}", name),
+        current_version: current_version.to_string(),
+        new_version: new_version.to_string(),
+        size: 0,
+        url: Some(format!("https://aur.archlinux.org/packages/{}", name)),
+        build_date: None,
+        first_submitted: None,
+        out_of_date: None,
+        orphaned: false,
+        maintainer: None,
+        previous_maintainer: None,
+        num_votes: None,
+        popularity: None,
+        security_severity: None,
+        security_issues: Vec::new(),
+        new_permissions: Vec::new(),
+        extra_dependencies: Vec::new(),
+        pkgbuild_needs_review: false,
+        aur_scan_findings: Vec::new(),
+        flatpak_installation: None,
+        appimage_path: None,
+    };
 }
 
 pub(crate) fn url_encode(s: &str) -> String {
@@ -194,7 +168,7 @@ fn enrich_with_aur_info(updates: &mut [PackageUpdate]) {
     }
 }
 
-fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
+pub fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
     let mut map = HashMap::new();
     if names.is_empty() {
         return map;
@@ -224,6 +198,7 @@ fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
         map.insert(
             name.to_string(),
             AurInfo {
+                version: str_field("Version"),
                 description: str_field("Description"),
                 url: str_field("URL"),
                 last_modified: entry.get("LastModified").and_then(|v| v.as_i64()),
@@ -239,6 +214,49 @@ fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
     return map;
 }
 
+pub fn search_aur(term: &str) -> Vec<(String, String, String)> {
+    if term.trim().is_empty() {
+        return Vec::new();
+    }
+    let url = format!(
+        "https://aur.archlinux.org/rpc/v5/search/{}",
+        url_encode(term)
+    );
+    let Ok(body) = http_get(&url, AUR_RPC_TIMEOUT_SECS) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return Vec::new();
+    };
+    let Some(results) = json.get("results").and_then(|r| r.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for entry in results {
+        let name = entry
+            .get("Name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let version = entry
+            .get("Version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = entry
+            .get("Description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        out.push((name, version, description));
+    }
+    return out;
+}
+
 fn aur_rpc_info_url(names: &[&str]) -> String {
     let mut url = String::from("https://aur.archlinux.org/rpc/v5/info?");
     for (i, name) in names.iter().enumerate() {
@@ -250,213 +268,4 @@ fn aur_rpc_info_url(names: &[&str]) -> String {
         url.push_str(&url_encode(name));
     }
     return url;
-}
-
-pub fn install_aur_packages(packages: Vec<String>) -> Result<Vec<String>> {
-    let Some(helper) = detect_aur_helper() else {
-        return Err(anyhow::anyhow!("No AUR helper available for installation"));
-    };
-
-    let settings = load_settings();
-    let mut args = helper.install_args().to_vec();
-    if settings.enable_devel_aur {
-        args.extend(helper.devel_args());
-    }
-
-    for package in &packages {
-        args.push(package);
-    }
-
-    let original_user = get_original_user();
-
-    if let Some(user) = original_user {
-        let mut command_parts = vec![
-            "sudo".to_string(),
-            "-u".to_string(),
-            user,
-            helper.command().to_string(),
-        ];
-        command_parts.extend(args.into_iter().map(|s| s.to_string()));
-        return Ok(command_parts);
-    } else {
-        let mut command_parts = vec![helper.command().to_string()];
-        command_parts.extend(args.into_iter().map(|s| s.to_string()));
-        return Ok(command_parts);
-    }
-}
-
-fn parse_aur_updates(output: &str, helper: &AurManagers) -> Result<Vec<PackageUpdate>> {
-    if matches!(helper, AurManagers::Shelly) {
-        return parse_shelly_updates(output);
-    }
-
-    let mut updates = Vec::new();
-
-    for line in output.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let package_update = match helper {
-            AurManagers::PamacCli => parse_pamac_line(line)?,
-            _ => parse_standard_aur_line(line)?,
-        };
-
-        if let Some(update) = package_update {
-            updates.push(update);
-        }
-    }
-
-    return Ok(updates);
-}
-
-fn parse_shelly_updates(output: &str) -> Result<Vec<PackageUpdate>> {
-    let trimmed = output.trim_start_matches('\u{FEFF}').trim();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let entries: Vec<ShellyUpdate> =
-        serde_json::from_str(trimmed).context("Failed to parse shelly aur list-updates JSON")?;
-
-    return Ok(entries
-        .into_iter()
-        .map(|e| PackageUpdate {
-            source: PackageSource::Aur,
-            repository: PackageSource::Aur.label().to_string(),
-            selected: true,
-            description: format!("AUR package: {}", e.name),
-            url: Some(format!("https://aur.archlinux.org/packages/{}", e.name)),
-            size: e.download_size.max(0),
-            current_version: e.current_version,
-            new_version: e.new_version,
-            name: e.name,
-            build_date: None,
-            first_submitted: None,
-            out_of_date: None,
-            orphaned: false,
-            maintainer: None,
-            previous_maintainer: None,
-            num_votes: None,
-            popularity: None,
-            security_severity: None,
-            security_issues: Vec::new(),
-            new_permissions: Vec::new(),
-            extra_dependencies: Vec::new(),
-            pkgbuild_needs_review: false,
-            aur_scan_findings: Vec::new(),
-            flatpak_installation: None,
-            appimage_path: None,
-        })
-        .collect());
-}
-
-fn parse_standard_aur_line(line: &str) -> Result<Option<PackageUpdate>> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-
-    if parts.len() >= 4 && parts[parts.len() - 2] == "->" {
-        let package_name = parts[0].to_string();
-        let current_version = parts[1].to_string();
-        let new_version = parts[parts.len() - 1].to_string();
-
-        return Ok(Some(PackageUpdate {
-            source: PackageSource::Aur,
-            repository: PackageSource::Aur.label().to_string(),
-            selected: true,
-            name: package_name.clone(),
-            description: format!("AUR package: {}", package_name),
-            current_version,
-            new_version,
-            size: 0,
-            url: Some(format!(
-                "https://aur.archlinux.org/packages/{}",
-                package_name
-            )),
-            build_date: None,
-            first_submitted: None,
-            out_of_date: None,
-            orphaned: false,
-            maintainer: None,
-            previous_maintainer: None,
-            num_votes: None,
-            popularity: None,
-            security_severity: None,
-            security_issues: Vec::new(),
-            new_permissions: Vec::new(),
-            extra_dependencies: Vec::new(),
-            pkgbuild_needs_review: false,
-            aur_scan_findings: Vec::new(),
-            flatpak_installation: None,
-            appimage_path: None,
-        }));
-    }
-
-    return Ok(None);
-}
-
-fn parse_pamac_line(line: &str) -> Result<Option<PackageUpdate>> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-
-    if parts.len() >= 3
-        && is_plausible_package_name(parts[0])
-        && is_plausible_version(parts[1])
-        && is_plausible_version(parts[2])
-    {
-        let package_name = parts[0].to_string();
-        let current_version = parts[1].to_string();
-        let new_version = parts[2].to_string();
-
-        return Ok(Some(PackageUpdate {
-            source: PackageSource::Aur,
-            repository: PackageSource::Aur.label().to_string(),
-            selected: true,
-            name: package_name.clone(),
-            description: format!("AUR package: {}", package_name),
-            current_version,
-            new_version,
-            size: 0,
-            url: Some(format!(
-                "https://aur.archlinux.org/packages/{}",
-                package_name
-            )),
-            build_date: None,
-            first_submitted: None,
-            out_of_date: None,
-            orphaned: false,
-            maintainer: None,
-            previous_maintainer: None,
-            num_votes: None,
-            popularity: None,
-            security_severity: None,
-            security_issues: Vec::new(),
-            new_permissions: Vec::new(),
-            extra_dependencies: Vec::new(),
-            pkgbuild_needs_review: false,
-            aur_scan_findings: Vec::new(),
-            flatpak_installation: None,
-            appimage_path: None,
-        }));
-    }
-
-    return Ok(None);
-}
-
-fn is_plausible_package_name(s: &str) -> bool {
-    if s.is_empty() || s.starts_with('-') {
-        return false;
-    }
-    return s
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '+' | '.' | '@'));
-}
-
-fn is_plausible_version(s: &str) -> bool {
-    if s.is_empty() || s.starts_with('-') {
-        return false;
-    }
-    return s
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false);
 }

@@ -10,9 +10,9 @@ target/
 *.pdb
 
 # AUR build artifacts
-arch-update-manager-*.pkg.tar.zst
+arch-install-manager-*.pkg.tar.zst
 pkg/
-arch-update-manager/
+arch-install-manager/
 
 ## Other
 release.md

@@ -9,10 +9,8 @@ use std::rc::Rc;
 
 use crate::helpers::appimage::{discover_appimages, embedded_source, managed_appimages};
 use crate::helpers::appimage_config::{
-    import_shelly_sources, remove_appimage_entry, set_source_for_path, shelly_has_appimage_data,
-    source_for_path,
+    remove_appimage_entry, set_source_for_path, source_for_path,
 };
-use crate::helpers::aur::is_command_available;
 use crate::log_info;
 use crate::models::appimage_update_source::AppImageUpdateSource;
 use crate::ui::dialogs::show_error_dialog;
@@ -23,9 +21,6 @@ pub fn build_appimage_sources_section(parent: &ApplicationWindow) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     let add_btn = Button::with_label("Add AppImage…");
     actions.append(&add_btn);
-    let import_btn = Button::with_label("Import from shelly");
-    import_btn.set_sensitive(is_command_available("shelly") && shelly_has_appimage_data());
-    actions.append(&import_btn);
     container.append(&actions);
 
     let list = ListBox::new();
@@ -99,26 +94,6 @@ pub fn build_appimage_sources_section(parent: &ApplicationWindow) -> GtkBox {
                 populate_cb();
             },
         );
-    });
-
-    let populate_for_import = populate.clone();
-    let parent_for_import = parent.clone();
-    import_btn.connect_clicked(move |_| match import_shelly_sources() {
-        Ok((imported, skipped)) => {
-            log_info!(
-                "imported {} appimage sources from shelly, skipped {}",
-                imported,
-                skipped
-            );
-            populate_for_import();
-        }
-        Err(e) => {
-            show_error_dialog(
-                parent_for_import.upcast_ref::<Window>(),
-                "Could not import from shelly",
-                &e.to_string(),
-            );
-        }
     });
 
     return container;

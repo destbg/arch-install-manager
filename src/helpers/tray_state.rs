@@ -10,15 +10,7 @@ use crate::models::package_update::PackageUpdate;
 use crate::models::tray_state::TrayState;
 
 pub fn state_dir() -> Option<PathBuf> {
-    if let Ok(state_home) = std::env::var("XDG_STATE_HOME") {
-        if !state_home.is_empty() {
-            return Some(PathBuf::from(state_home).join("arch-update-manager"));
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        return Some(PathBuf::from(home).join(".local/state/arch-update-manager"));
-    }
-    return None;
+    return Some(PathBuf::from("/run/daim"));
 }
 
 pub fn state_file() -> Option<PathBuf> {

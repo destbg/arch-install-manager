@@ -12,16 +12,16 @@ use ksni::{MenuItem, Status, ToolTip, Tray};
 use signal_hook::consts::SIGUSR1;
 use signal_hook::iterator::Signals;
 
-use arch_update_manager::helpers::settings::{load_settings, reload_settings, save_settings};
-use arch_update_manager::helpers::snooze::{clear_snooze, current_snooze_until, set_snooze};
-use arch_update_manager::helpers::tray_state::state_file;
-use arch_update_manager::models::app_settings::AppSettings;
-use arch_update_manager::models::tray_state::TrayState;
+use arch_install_manager::helpers::settings::{load_settings, reload_settings, save_settings};
+use arch_install_manager::helpers::snooze::{clear_snooze, current_snooze_until, set_snooze};
+use arch_install_manager::helpers::tray_state::state_file;
+use arch_install_manager::models::app_settings::AppSettings;
+use arch_install_manager::models::tray_state::TrayState;
 
 static REFRESH_TX: OnceLock<mpsc::Sender<()>> = OnceLock::new();
 
 const FALLBACK_POLL_INTERVAL: Duration = Duration::from_secs(300);
-const ICON_NO_UPDATES: &str = "arch-update-manager";
+const ICON_NO_UPDATES: &str = "arch-install-manager";
 const ICON_UPDATES_AVAILABLE: &str = "software-update-available-symbolic";
 
 struct ArchUpdateTray {
@@ -31,17 +31,14 @@ struct ArchUpdateTray {
 
 impl ArchUpdateTray {
     fn launch_main_app() {
-        if let Err(e) = std::process::Command::new("pkexec")
-            .arg("arch-update-manager")
-            .spawn()
-        {
-            eprintln!("Failed to launch arch-update-manager: {}", e);
+        if let Err(e) = std::process::Command::new("daim-gui").spawn() {
+            eprintln!("Failed to launch daim-gui: {}", e);
         }
     }
 
     fn run_check(&self) {
         self.expect_check_notification.store(true, Ordering::SeqCst);
-        if let Err(e) = std::process::Command::new("arch-update-manager-check")
+        if let Err(e) = std::process::Command::new("daim-check")
             .arg("--manual")
             .status()
         {
@@ -67,10 +64,10 @@ impl ArchUpdateTray {
         thread::spawn(move || {
             if is_main_app_running() {
                 let text = format!(
-                    "Close Arch Update Manager first to change favorites.\n\n\"{}\" was not changed.",
+                    "Close Arch Install Manager first to change favorites.\n\n\"{}\" was not changed.",
                     package
                 );
-                if !show_warning_dialog("Arch Update Manager is open", &text) {
+                if !show_warning_dialog("Arch Install Manager is open", &text) {
                     notify_app_running(&package);
                 }
                 return;
@@ -107,8 +104,8 @@ fn confirm_remove_via_notification(package: String) {
     let result = notify_rust::Notification::new()
         .summary("Remove from favorites?")
         .body(&body)
-        .icon("arch-update-manager")
-        .appname("Arch Update Manager")
+        .icon("arch-install-manager")
+        .appname("Arch Install Manager")
         .action("remove", "Remove")
         .action("default", "Cancel")
         .show();
@@ -125,14 +122,14 @@ fn confirm_remove_via_notification(package: String) {
 
 fn notify_app_running(package: &str) {
     let body = format!(
-        "Close Arch Update Manager first to change favorites. \"{}\" was not changed.",
+        "Close Arch Install Manager first to change favorites. \"{}\" was not changed.",
         package
     );
     let _ = notify_rust::Notification::new()
-        .summary("Arch Update Manager is open")
+        .summary("Arch Install Manager is open")
         .body(&body)
-        .icon("arch-update-manager")
-        .appname("Arch Update Manager")
+        .icon("arch-install-manager")
+        .appname("Arch Install Manager")
         .show();
 }
 
@@ -205,7 +202,7 @@ fn is_main_app_running() -> bool {
             continue;
         };
         let comm = comm.trim_end();
-        if comm.is_empty() || !"arch-update-manager".starts_with(comm) {
+        if comm.is_empty() || !"daim-gui".starts_with(comm) {
             continue;
         }
 
@@ -221,7 +218,7 @@ fn is_main_app_running() -> bool {
 
         let arg0 = String::from_utf8_lossy(arg0);
         let base = arg0.rsplit('/').next().unwrap_or(&arg0);
-        if base == "arch-update-manager" {
+        if base == "daim-gui" {
             return true;
         }
     }
@@ -260,11 +257,11 @@ fn filter_favorite_entries(entries: &[String], settings: &AppSettings) -> Vec<St
 
 impl Tray for ArchUpdateTray {
     fn id(&self) -> String {
-        return "arch-update-manager-tray".into();
+        return "daim-tray".into();
     }
 
     fn title(&self) -> String {
-        return "Arch Update Manager".into();
+        return "Arch Install Manager".into();
     }
 
     fn icon_name(&self) -> String {
@@ -545,7 +542,7 @@ fn main() {
     let expect_check_notification = Arc::new(AtomicBool::new(false));
 
     thread::spawn(|| {
-        if let Err(e) = std::process::Command::new("arch-update-manager-check").status() {
+        if let Err(e) = std::process::Command::new("daim-check").status() {
             eprintln!("Failed to run initial check on tray startup: {}", e);
         }
     });
@@ -667,8 +664,8 @@ fn fire_notification(count: usize) {
         let result = notify_rust::Notification::new()
             .summary("Arch Updates Available")
             .body(&body)
-            .icon("arch-update-manager")
-            .appname("Arch Update Manager")
+            .icon("arch-install-manager")
+            .appname("Arch Install Manager")
             .action("default", "Open")
             .action("open", "Open Update Manager")
             .show();
@@ -696,8 +693,8 @@ fn fire_check_complete_notification(count: usize) {
         notification
             .summary(summary)
             .body(&body)
-            .icon("arch-update-manager")
-            .appname("Arch Update Manager");
+            .icon("arch-install-manager")
+            .appname("Arch Install Manager");
 
         let result = if count > 0 {
             notification

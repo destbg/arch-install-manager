@@ -1,7 +1,11 @@
 [package]
-name = "arch-update-manager"
+name = "arch-install-manager"
 version = "1.0.0"
 edition = "2024"
+
+[lib]
+name = "arch_install_manager"
+path = "src/lib.rs"
 
 [dependencies]
 gtk4 = { version = "0.11.4", features = ["v4_10"] }
@@ -26,15 +30,31 @@ ksni = { version = "0.3.5", default-features = false, features = [
 ] }
 signal-hook = "0.4.4"
 notify-rust = "4.18.0"
+nix = { version = "0.31.3", features = [
+    "socket",
+    "uio",
+    "fs",
+    "user",
+    "process",
+    "term",
+] }
 
 [[bin]]
-name = "arch-update-manager"
+name = "daim-gui"
 path = "src/main.rs"
 
 [[bin]]
-name = "arch-update-manager-tray"
+name = "daim"
+path = "src/bin/daim.rs"
+
+[[bin]]
+name = "daim-helper"
+path = "src/bin/helper.rs"
+
+[[bin]]
+name = "daim-tray"
 path = "src/bin/tray.rs"
 
 [[bin]]
-name = "arch-update-manager-check"
+name = "daim-check"
 path = "src/bin/check.rs"

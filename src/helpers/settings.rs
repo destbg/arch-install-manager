@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use crate::helpers::aur::{is_command_available, pamac_supports_aur, shelly_supports_aur};
+use crate::helpers::aur::is_command_available;
 use crate::helpers::elevated::chown_to_user;
 use crate::models::app_settings::AppSettings;
 use crate::models::check_schedule::CheckSchedule;
@@ -14,7 +14,6 @@ static SETTINGS_CACHE: OnceLock<Mutex<AppSettings>> = OnceLock::new();
 fn default_settings() -> AppSettings {
     return AppSettings {
         enable_aur_support: false,
-        preferred_aur_helper: None,
         create_timeshift_snapshot: is_command_available("timeshift"),
         snapshot_retention_count: 1,
         snapshot_retention_period: SnapshotRetentionPeriod::Forever,
@@ -95,54 +94,6 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
     return Ok(());
 }
 
-pub fn get_available_aur_helpers() -> Vec<String> {
-    let helpers = ["yay", "paru", "trizen", "pikaur", "shelly", "pamac"];
-    let mut available = Vec::new();
-
-    for helper in &helpers {
-        if !is_command_available(helper) {
-            continue;
-        }
-        if *helper == "pamac" && !pamac_supports_aur() {
-            continue;
-        }
-        if *helper == "shelly" && !shelly_supports_aur() {
-            continue;
-        }
-        available.push(helper.to_string());
-    }
-
-    return available;
-}
-
-pub fn get_effective_aur_helper(settings: &AppSettings) -> Option<String> {
-    if !settings.enable_aur_support {
-        return None;
-    }
-
-    if let Some(ref preferred) = settings.preferred_aur_helper {
-        if is_command_available(preferred) {
-            return Some(preferred.clone());
-        }
-    }
-
-    let helpers = ["yay", "paru", "trizen", "pikaur", "shelly", "pamac"];
-    for helper in &helpers {
-        if !is_command_available(helper) {
-            continue;
-        }
-        if *helper == "pamac" && !pamac_supports_aur() {
-            continue;
-        }
-        if *helper == "shelly" && !shelly_supports_aur() {
-            continue;
-        }
-        return Some(helper.to_string());
-    }
-
-    return None;
-}
-
 fn load_from_file() -> Result<AppSettings> {
     let path = settings_path()?;
 
@@ -167,7 +118,7 @@ fn settings_path() -> Result<PathBuf> {
         return Err(anyhow::anyhow!("Could not determine config directory"));
     };
 
-    let app_config_dir = config_dir.join("arch-update-manager");
+    let app_config_dir = config_dir.join("arch-install-manager");
 
     if !app_config_dir.exists() {
         fs::create_dir_all(&app_config_dir).context("Failed to create config directory")?;

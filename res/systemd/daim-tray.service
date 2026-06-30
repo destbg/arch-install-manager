@@ -1,11 +1,11 @@
 [Unit]
-Description=Arch Update Manager tray applet
+Description=Arch Install Manager tray applet
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/arch-update-manager-tray
+ExecStart=/usr/bin/daim-tray
 Restart=on-failure
 RestartSec=3
 

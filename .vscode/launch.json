@@ -2,25 +2,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug executable 'arch-update-manager'",
+            "name": "Debug executable 'daim-gui'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "run",
-                    "--bin=arch-update-manager"
+                    "--bin=daim-gui"
                 ]
             },
             "args": []
         },
         {
-            "name": "Debug unit tests in executable 'arch-update-manager'",
+            "name": "Debug unit tests in executable 'daim-gui'",
             "type": "lldb",
             "request": "launch",
             "cargo": {
                 "args": [
                     "test",
-                    "--bin=arch-update-manager"
+                    "--bin=daim-gui"
                 ]
             }
         }

@@ -1,0 +1,8 @@
+[Unit]
+Description=Check for pending Arch updates (arch-install-manager)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/daim-check

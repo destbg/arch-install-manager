@@ -1,10 +1,10 @@
-pub const TIMESHIFT_COMMENT: &str = "arch-update-manager";
-pub const APP_ID: &str = "com.destbg.arch-update-manager";
+pub const TIMESHIFT_COMMENT: &str = "arch-install-manager";
+pub const APP_ID: &str = "com.destbg.arch-install-manager";
 
 pub const OWN_PACKAGES: [&str; 3] = [
-    "arch-update-manager",
-    "arch-update-manager-bin",
-    "arch-update-manager-git",
+    "arch-install-manager",
+    "arch-install-manager-bin",
+    "arch-install-manager-git",
 ];
 
 pub fn is_own_package(name: &str) -> bool {

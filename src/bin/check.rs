@@ -2,16 +2,14 @@ use std::process::Command;
 
 use chrono::Utc;
 
-use arch_update_manager::helpers::appimage::get_appimage_updates;
-use arch_update_manager::helpers::aur::get_aur_updates;
-use arch_update_manager::helpers::flatpak::get_flatpak_updates;
-use arch_update_manager::helpers::network::is_network_metered;
-use arch_update_manager::helpers::pacman_ignore::list_managed_ignores;
-use arch_update_manager::helpers::power::is_on_battery;
-use arch_update_manager::helpers::settings::load_settings;
-use arch_update_manager::helpers::snooze::current_snooze_until;
-use arch_update_manager::helpers::tray_state::write_tray_state;
-use arch_update_manager::models::tray_state::TrayState;
+use arch_install_manager::helpers::aur::get_aur_updates;
+use arch_install_manager::helpers::network::is_network_metered;
+use arch_install_manager::helpers::pacman_ignore::list_managed_ignores;
+use arch_install_manager::helpers::power::is_on_battery;
+use arch_install_manager::helpers::settings::load_settings;
+use arch_install_manager::helpers::snooze::current_snooze_until;
+use arch_install_manager::helpers::tray_state::write_tray_state;
+use arch_install_manager::models::tray_state::TrayState;
 
 fn main() {
     let manual = std::env::args().any(|a| a == "--manual");
@@ -60,37 +58,8 @@ fn main() {
         Vec::new()
     };
 
-    let flatpak = if settings.enable_flatpak_support {
-        match get_flatpak_updates() {
-            Ok(updates) => updates
-                .into_iter()
-                .filter(|u| !blacklist.contains(&u.name))
-                .map(|u| format!("{} {} -> {}", u.name, u.current_version, u.new_version))
-                .collect(),
-            Err(e) => {
-                eprintln!("Failed to get Flatpak updates: {}", e);
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
-
-    let appimage = if settings.enable_appimage_support {
-        match get_appimage_updates() {
-            Ok(updates) => updates
-                .into_iter()
-                .filter(|u| !blacklist.contains(&u.name))
-                .map(|u| format!("{} {} -> {}", u.name, u.current_version, u.new_version))
-                .collect(),
-            Err(e) => {
-                eprintln!("Failed to get AppImage updates: {}", e);
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
+    let flatpak: Vec<String> = Vec::new();
+    let appimage: Vec<String> = Vec::new();
 
     let state = TrayState {
         last_check: Some(Utc::now()),
@@ -110,7 +79,7 @@ fn main() {
 
 fn signal_tray() {
     let _ = Command::new("pkill")
-        .args(["-USR1", "-f", "arch-update-manager-tray"])
+        .args(["-USR1", "-f", "daim-tray"])
         .status();
 }
 
@@ -123,21 +92,13 @@ fn line_starts_with_any(line: &str, names: &[String]) -> bool {
 }
 
 fn get_repo_updates() -> anyhow::Result<Vec<String>> {
-    let output = Command::new("checkupdates").output()?;
-
-    if !output.status.success() {
-        let code = output.status.code().unwrap_or(-1);
-        if code == 2 {
-            return Ok(Vec::new());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!(
-            "checkupdates failed ({}): {}",
-            code,
-            stderr.trim()
-        ));
+    let sync = Command::new("pacman").args(["-Sy"]).output()?;
+    if !sync.status.success() {
+        let stderr = String::from_utf8_lossy(&sync.stderr);
+        return Err(anyhow::anyhow!("pacman -Sy failed: {}", stderr.trim()));
     }
 
+    let output = Command::new("pacman").args(["-Qu"]).output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut updates = Vec::new();
     for line in stdout.lines() {

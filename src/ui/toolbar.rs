@@ -1,6 +1,5 @@
 use crate::constants::TIMESHIFT_COMMENT;
 use crate::helpers::appimage::build_appimage_update_commands;
-use crate::helpers::aur::install_aur_packages;
 use crate::helpers::disk_space::available_bytes;
 use crate::helpers::elevated::open_url_as_user;
 use crate::helpers::flatpak::build_flatpak_update_command;
@@ -11,14 +10,11 @@ use crate::helpers::snapper::{
     build_snapper_snapshot_command, is_snap_pac_installed, is_snapper_installed,
 };
 use crate::helpers::terminal::spawn_terminal;
-use crate::helpers::timeshift::{cleanup_timeshift_snapshots, create_timeshift_snapshot};
 use crate::log_info;
 use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
-use crate::ui::dialogs::{
-    create_progress_dialog, show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog,
-};
+use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog};
 use crate::ui::history_dialog::show_history_dialog;
 use crate::ui::main_window::{find_favorites_column, find_package_store, load_packages};
 use crate::ui::package_list::{save_unselected_from_store, update_statusbar};
@@ -33,9 +29,6 @@ use gtk4::{
 };
 use shlex::try_quote as quote;
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 
 const DISK_SAFETY_MARGIN: i64 = 512 * 1024 * 1024;
 
@@ -288,6 +281,9 @@ fn find_store_and_statusbar(toolbar: &GtkBox) -> Option<(ListStore, Label)> {
     let Some((_, content_box, _)) = get_navigation_stack(toolbar) else {
         return None;
     };
+    let Some(content_box) = crate::ui::main_window::update_layout(&content_box) else {
+        return None;
+    };
 
     let Some(paned) = content_box
         .last_child()
@@ -441,6 +437,7 @@ fn run_install(
     create_snapshot: bool,
     create_snapper: bool,
 ) {
+    let _ = crate::ipc::client::attach_session();
     if let Err(e) = install_selected_packages_ui(store, window, create_snapshot, create_snapper) {
         log_info!("install failed: {}", e);
         eprintln!("Failed to install packages: {}", e);
@@ -501,32 +498,13 @@ fn install_selected_packages_ui(
         return Ok(());
     }
 
-    if create_snapshot {
-        let progress_dialog = create_progress_dialog(
-            &window.upcast_ref::<gtk4::Window>(),
-            "Creating System Snapshot",
-            "Creating Timeshift snapshot and deleting old snapshots...\n\nPlease wait, this may take a few minutes.",
-        );
-
-        execute_timeshift_operations_async(
-            official_packages.clone(),
-            aur_packages.clone(),
-            flatpak_packages.clone(),
-            appimage_packages.clone(),
-            window.clone(),
-            progress_dialog,
-            create_snapper,
-        );
-
-        return Ok(());
-    }
-
     if let Err(e) = navigate_to_terminal_and_install(
         window,
         official_packages,
         aur_packages,
         flatpak_packages,
         appimage_packages,
+        create_snapshot,
         create_snapper,
     ) {
         show_error_dialog(
@@ -536,75 +514,6 @@ fn install_selected_packages_ui(
         );
     }
     return Ok(());
-}
-
-fn execute_timeshift_operations_async(
-    official_packages: Vec<PackageUpdate>,
-    aur_packages: Vec<PackageUpdate>,
-    flatpak_packages: Vec<PackageUpdate>,
-    appimage_packages: Vec<PackageUpdate>,
-    window: ApplicationWindow,
-    progress_dialog: gtk4::Window,
-    create_snapper: bool,
-) {
-    let (tx, rx) = mpsc::channel();
-    let official_packages_clone = official_packages.clone();
-    let aur_packages_clone = aur_packages.clone();
-    let flatpak_packages_clone = flatpak_packages.clone();
-    let appimage_packages_clone = appimage_packages.clone();
-    let settings = load_settings();
-
-    thread::spawn(move || match create_timeshift_snapshot(TIMESHIFT_COMMENT) {
-        Ok(newest) => match cleanup_timeshift_snapshots(TIMESHIFT_COMMENT, &settings, &newest) {
-            Ok(()) => {
-                let _ = tx.send(("success", "Package installation starting".to_string()));
-            }
-            Err(e) => {
-                let _ = tx.send(("error", format!("Failed to clean up old snapshots: {}", e)));
-            }
-        },
-        Err(e) => {
-            let _ = tx.send(("error", format!("Failed to create system snapshot: {}", e)));
-        }
-    });
-
-    glib::timeout_add_local(Duration::from_millis(50), move || match rx.try_recv() {
-        Ok(("success", _)) => {
-            progress_dialog.close();
-
-            if let Err(e) = navigate_to_terminal_and_install(
-                &window,
-                official_packages_clone.clone(),
-                aur_packages_clone.clone(),
-                flatpak_packages_clone.clone(),
-                appimage_packages_clone.clone(),
-                create_snapper,
-            ) {
-                show_error_dialog(
-                    &window.upcast_ref::<gtk4::Window>(),
-                    "Installation Error",
-                    &format!("Failed to start installation: {}", e),
-                );
-            }
-
-            glib::ControlFlow::Break
-        }
-        Ok(("error", message)) => {
-            progress_dialog.close();
-            show_error_dialog(
-                &window.upcast_ref::<gtk4::Window>(),
-                "Timeshift Error",
-                &message,
-            );
-            glib::ControlFlow::Break
-        }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(mpsc::TryRecvError::Disconnected) => {
-            progress_dialog.close();
-            glib::ControlFlow::Break
-        }
-        _ => glib::ControlFlow::Continue,
-    });
 }
 
 fn create_button_content(icon_name: &str, label_text: &str) -> GtkBox {
@@ -645,6 +554,7 @@ fn start_installation_in_terminal(
     aur_packages: Vec<PackageUpdate>,
     flatpak_packages: Vec<PackageUpdate>,
     appimage_packages: Vec<PackageUpdate>,
+    create_timeshift: bool,
     create_snapper: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let settings = load_settings();
@@ -698,30 +608,7 @@ fn start_installation_in_terminal(
                 .collect::<Result<Vec<String>, _>>()?
                 .join(" ");
 
-            let cmd = format!(
-                r#"(expect -c '
-set timeout -1
-spawn sudo pacman -S {pkgs}
-expect {{
-    -re {{Proceed with installation\? \[Y/n\]}} {{
-        send -- "y\r"
-        exp_continue
-    }}
-    eof
-}}
-catch wait result
-set exit_code [lindex $result 3]
-if {{$exit_code eq ""}} {{
-    set exit_code 1
-}}
-exit $exit_code
-'
-expect_status=$?
-while [ -e /var/lib/pacman/db.lck ]; do sleep 0.2; done
-exit $expect_status)"#,
-                pkgs = pkgs_quoted
-            );
-            parts.push(cmd);
+            parts.push(format!("daim install {}", pkgs_quoted));
         }
 
         if parts.is_empty() {
@@ -734,16 +621,12 @@ exit $expect_status)"#,
     };
 
     let aur_cmd = if !aur_packages.is_empty() {
-        let parts = install_aur_packages(aur_packages.into_iter().map(|p| p.name).collect())?;
-        let line = parts
+        let names = aur_packages
             .iter()
-            .map(|p| quote(&p))
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .map(|cow| cow.as_ref())
-            .collect::<Vec<_>>()
+            .map(|p| quote(&p.name).map(|cow| cow.into_owned()))
+            .collect::<Result<Vec<String>, _>>()?
             .join(" ");
-        Some(line)
+        Some(format!("daim install {}", names))
     } else {
         None
     };
@@ -767,16 +650,29 @@ exit $expect_status)"#,
         None
     };
 
+    let timeshift_cmd = if create_timeshift {
+        Some(format!("daim snapshot-timeshift {}", TIMESHIFT_COMMENT))
+    } else {
+        None
+    };
+
     let snapper_cmd = if create_snapper {
         Some(build_snapper_snapshot_command())
     } else {
         None
     };
 
-    let parts: Vec<String> = [snapper_cmd, pacman_cmd, aur_cmd, flatpak_cmd, appimage_cmd]
-        .into_iter()
-        .flatten()
-        .collect();
+    let parts: Vec<String> = [
+        timeshift_cmd,
+        snapper_cmd,
+        pacman_cmd,
+        aur_cmd,
+        flatpak_cmd,
+        appimage_cmd,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
     if parts.is_empty() {
         return Ok(());
@@ -796,6 +692,7 @@ fn navigate_to_terminal_and_install(
     aur_packages: Vec<PackageUpdate>,
     flatpak_packages: Vec<PackageUpdate>,
     appimage_packages: Vec<PackageUpdate>,
+    create_timeshift: bool,
     create_snapper: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
@@ -822,6 +719,7 @@ fn navigate_to_terminal_and_install(
         aur_packages,
         flatpak_packages,
         appimage_packages,
+        create_timeshift,
         create_snapper,
     )?;
 

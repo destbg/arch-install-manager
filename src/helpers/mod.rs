@@ -26,6 +26,7 @@ pub mod post_update;
 pub mod power;
 pub mod release_notes;
 pub mod repo_switches;
+pub mod search;
 pub mod security;
 pub mod settings;
 pub mod snapper;

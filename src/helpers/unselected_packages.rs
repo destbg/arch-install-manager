@@ -53,7 +53,7 @@ fn unselected_packages_path() -> Result<PathBuf> {
         return Err(anyhow::anyhow!("Could not determine config directory"));
     };
 
-    let app_config_dir = config_dir.join("arch-update-manager");
+    let app_config_dir = config_dir.join("arch-install-manager");
 
     if !app_config_dir.exists() {
         fs::create_dir_all(&app_config_dir).context("Failed to create config directory")?;

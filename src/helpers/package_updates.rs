@@ -42,20 +42,8 @@ impl From<anyhow::Error> for UpdateError {
 }
 
 pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
-    let sync_output = Command::new("sudo")
-        .args(&["pacman", "-Sy"])
-        .output()
-        .map_err(|e| {
-            UpdateError::CommandFailed(format!("Failed to sync package databases: {}", e))
-        })?;
-
-    if !sync_output.status.success() {
-        let stderr = String::from_utf8_lossy(&sync_output.stderr);
-        return Err(UpdateError::SyncFailed(stderr.to_string()));
-    }
-
     let output = Command::new("pacman")
-        .args(&["-Qu"])
+        .args(["-Qu"])
         .output()
         .context("Failed to run pacman -Qu")?;
 
@@ -102,7 +90,7 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
             .iter()
             .map(|(name, _, _)| name.as_str())
             .collect();
-        let (package_info_map, repo_sizes_map) = get_batch_repository_info(&package_names)?;
+        let (package_info_map, repo_sizes_map) = get_batch_repository_info(&package_names, None)?;
         let installed_sizes_map = get_batch_installed_sizes(&package_names)?;
         let build_dates_map = get_build_dates(&package_names);
 
@@ -226,12 +214,17 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
 
 fn get_batch_repository_info(
     package_names: &[&str],
+    dbpath: Option<&str>,
 ) -> Result<(HashMap<String, PackageInfo>, HashMap<String, String>), UpdateError> {
     if package_names.is_empty() {
         return Ok((HashMap::new(), HashMap::new()));
     }
 
     let mut args = vec!["-Si"];
+    if let Some(path) = dbpath {
+        args.push("--dbpath");
+        args.push(path);
+    }
     args.extend(package_names.iter());
 
     let output = Command::new("pacman")

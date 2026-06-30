@@ -381,10 +381,7 @@ pub fn set_pacnew_section(page: &PostUpdatePage, files: Vec<String>, window: &Ap
     let window_clone = window.clone();
     terminal_btn.connect_clicked(move |_| {
         log_info!("post-update: Open pacdiff in terminal clicked");
-        run_post_update_command(
-            &window_clone,
-            "DIFFPROG=${DIFFPROG:-vimdiff} sudo -E pacdiff",
-        );
+        run_post_update_command(&window_clone, "daim pacdiff");
     });
     footer_row.append(&terminal_btn);
 
@@ -608,7 +605,7 @@ pub fn set_resolutions_section(
             return;
         }
 
-        let command = format!("sudo pacman -S {}", quoted.join(" "));
+        let command = format!("daim install {}", quoted.join(" "));
         run_post_update_command(&window_clone, &command);
     });
 
@@ -711,7 +708,7 @@ pub fn set_cache_section(
     clean_btn.connect_clicked(move |_| {
         log_info!("post-update: Clean cache clicked");
         let command = format!(
-            "sudo paccache -rk{} && sudo paccache -ruk{}",
+            "daim paccache --keep {} --keep-uninstalled {}",
             keep_old, keep_uninstalled
         );
         run_post_update_command(&window_clone, &command);
@@ -986,19 +983,7 @@ fn install_post_update_css() {
 
         let provider = gtk4::CssProvider::new();
         provider.load_from_data(
-            ".post-update-card {
-                background-color: alpha(currentColor, 0.05);
-                border: 1px solid alpha(currentColor, 0.1);
-                border-radius: 12px;
-                padding: 14px;
-            }
-            .post-update-card list.boxed-list {
-                background-color: transparent;
-                border: none;
-            }
-            .post-update-card list.boxed-list > row {
-                background-color: transparent;
-            }",
+            ".post-update-card {                background-color: alpha(currentColor, 0.05);                border: 1px solid alpha(currentColor, 0.1);                border-radius: 12px;                padding: 14px;            }            .post-update-card list.boxed-list {                background-color: transparent;                border: none;            }            .post-update-card list.boxed-list > row {                background-color: transparent;            }",
         );
 
         gtk4::style_context_add_provider_for_display(
@@ -1019,7 +1004,7 @@ fn run_orphan_removal(window: &ApplicationWindow, packages: Vec<String>) {
         return;
     }
 
-    let command = format!("sudo pacman -Rns {}", quoted.join(" "));
+    let command = format!("daim remove --cascade --nosave {}", quoted.join(" "));
     run_post_update_command(window, &command);
 }
 
