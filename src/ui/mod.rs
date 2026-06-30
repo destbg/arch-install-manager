@@ -1,0 +1,25 @@
+pub mod appimage_sources;
+pub mod aur_scan_dialog;
+pub mod blacklist_dialog;
+pub mod context_menu;
+pub mod dialogs;
+pub mod downgrade_dialog;
+pub mod error_page;
+pub mod favorites_dialog;
+pub mod history_dialog;
+pub mod info_panel;
+pub mod loading;
+pub mod main_window;
+pub mod news_dialog;
+pub mod no_updates;
+pub mod package_files_dialog;
+pub mod package_list;
+pub mod pacnew_diff;
+pub mod pkgbuild_review_dialog;
+pub mod post_update_page;
+pub mod settings_dialog;
+pub mod terminal_page;
+pub mod toolbar;
+pub mod vulnerabilities_dialog;
+
+pub use main_window::build_ui;
