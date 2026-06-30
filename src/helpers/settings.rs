@@ -11,45 +11,6 @@ use crate::models::snapshot_retention_period::SnapshotRetentionPeriod;
 
 static SETTINGS_CACHE: OnceLock<Mutex<AppSettings>> = OnceLock::new();
 
-fn default_settings() -> AppSettings {
-    return AppSettings {
-        enable_aur_support: false,
-        create_timeshift_snapshot: is_command_available("timeshift"),
-        snapshot_retention_count: 1,
-        snapshot_retention_period: SnapshotRetentionPeriod::Forever,
-        separate_repository_groups: false,
-        separate_repositories: Vec::new(),
-        remember_unselected_packages: true,
-        enable_favorites: true,
-        show_favorites_column: false,
-        favorite_packages: Vec::new(),
-        favorites_exclusion_mode: false,
-        enable_flatpak_support: is_command_available("flatpak"),
-        enable_appimage_support: true,
-        enable_devel_aur: false,
-        keep_old_packages: 3,
-        keep_uninstalled_packages: 0,
-        auto_clean_cache: false,
-        run_post_update_checks: true,
-        create_snapper_snapshot: false,
-        enable_system_tray: false,
-        check_schedule: CheckSchedule::Daily,
-        tray_always_visible: false,
-        tray_only_favorites: false,
-        tray_menu_only_favorites: false,
-        skip_check_on_metered: false,
-        skip_check_on_battery: false,
-        show_update_notifications: false,
-        show_package_descriptions: true,
-        show_updated_date: true,
-        min_update_age_days: 0,
-        min_update_age_aur_only: false,
-        log_retention_days: 7,
-        check_arch_news: true,
-        enable_mirror_refresh: true,
-    };
-}
-
 pub fn load_settings() -> AppSettings {
     let cache = SETTINGS_CACHE.get_or_init(|| {
         let settings = match load_from_file() {
@@ -92,6 +53,48 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
     }
 
     return Ok(());
+}
+
+fn default_settings() -> AppSettings {
+    return AppSettings {
+        enable_aur_support: false,
+        create_timeshift_snapshot: is_command_available("timeshift"),
+        snapshot_retention_count: 1,
+        snapshot_retention_period: SnapshotRetentionPeriod::Forever,
+        separate_repository_groups: false,
+        separate_repositories: Vec::new(),
+        remember_unselected_packages: true,
+        enable_favorites: true,
+        show_favorites_column: false,
+        favorite_packages: Vec::new(),
+        favorites_exclusion_mode: false,
+        enable_flatpak_support: is_command_available("flatpak"),
+        enable_appimage_support: true,
+        enable_devel_aur: false,
+        keep_old_packages: 3,
+        keep_uninstalled_packages: 0,
+        auto_clean_cache: false,
+        run_post_update_checks: true,
+        create_snapper_snapshot: false,
+        enable_system_tray: false,
+        check_schedule: CheckSchedule::Daily,
+        tray_always_visible: false,
+        tray_only_favorites: false,
+        tray_menu_only_favorites: false,
+        skip_check_on_metered: false,
+        skip_check_on_battery: false,
+        show_update_notifications: false,
+        show_package_descriptions: true,
+        show_updated_date: true,
+        min_update_age_days: 0,
+        min_update_age_aur_only: false,
+        log_retention_days: 7,
+        check_arch_news: true,
+        enable_mirror_refresh: true,
+        install_search_official: true,
+        install_search_aur: true,
+        install_search_flatpak: false,
+    };
 }
 
 fn load_from_file() -> Result<AppSettings> {

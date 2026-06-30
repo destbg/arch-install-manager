@@ -8,6 +8,13 @@ use crate::ipc::client;
 use crate::ipc::protocol::{Op, Response};
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
+use crate::models::search_sources::SearchSources;
+
+const CLI_SEARCH_SOURCES: SearchSources = SearchSources {
+    official: true,
+    aur: true,
+    flatpak: false,
+};
 
 pub fn install(targets: &[String]) -> i32 {
     if targets.is_empty() {
@@ -49,23 +56,17 @@ pub fn install(targets: &[String]) -> i32 {
     return 0;
 }
 
-pub fn search(term: &str) -> i32 {
-    let items = search_packages(term);
+pub fn search(term: &str, select: bool) -> i32 {
+    let items = search_packages(term, CLI_SEARCH_SOURCES);
     if items.is_empty() {
         eprintln!("daim: no packages found for '{term}'");
         return 1;
     }
-    render(&items, false);
-    return 0;
-}
+    render(&items, select);
 
-pub fn query(term: &str) -> i32 {
-    let items = search_packages(term);
-    if items.is_empty() {
-        eprintln!("daim: no packages found for '{term}'");
-        return 1;
+    if !select {
+        return 0;
     }
-    render(&items, true);
 
     print!("==> Packages to install (e.g. 1, 1 3 5, 2-4): ");
     let _ = std::io::stdout().flush();

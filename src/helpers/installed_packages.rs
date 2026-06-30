@@ -62,7 +62,7 @@ pub fn get_installed_packages() -> Vec<PackageUpdate> {
             name,
             description: pkg.desc().unwrap_or("").to_string(),
             new_version: pkg.version().to_string(),
-            size: pkg.isize(),
+            size: Some(pkg.isize()),
             ..Default::default()
         });
     }

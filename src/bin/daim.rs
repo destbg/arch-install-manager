@@ -22,8 +22,17 @@ fn main() {
 
     match args[0].as_str() {
         "install" | "i" => exit(engine::install(&args[1..])),
-        "search" | "s" => exit(engine::search(&args[1..].join(" "))),
-        "query" | "q" => exit(engine::query(&args[1..].join(" "))),
+        "search" | "s" | "query" | "q" => {
+            let mut select = true;
+            let mut terms = Vec::new();
+            for a in &args[1..] {
+                match a.as_str() {
+                    "--no-select" | "-n" => select = false,
+                    other => terms.push(other.to_string()),
+                }
+            }
+            exit(engine::search(&terms.join(" "), select));
+        }
         _ => {}
     }
 
@@ -150,8 +159,7 @@ fn usage() {
         "usage: daim <command> [args]\n\
          \n\
          commands:\n  \
-         q | query <term>              search, then pick numbers to install\n  \
-         search <term>                 search the repositories and the AUR\n  \
+         s | search | q | query <term> [--no-select]\n                                search the repositories and the AUR,\n                                then pick numbers to install (--no-select to only list)\n  \
          sync                          refresh the package databases\n  \
          upgrade                       upgrade installed packages\n  \
          install <pkg>...              install packages\n  \

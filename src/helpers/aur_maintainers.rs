@@ -5,10 +5,6 @@ use std::path::PathBuf;
 use crate::helpers::elevated::chown_to_user;
 use crate::helpers::tray_state::state_dir;
 
-fn maintainers_file() -> Option<PathBuf> {
-    return state_dir().map(|d| d.join("aur_maintainers.json"));
-}
-
 pub fn read_maintainers() -> HashMap<String, String> {
     let Some(path) = maintainers_file() else {
         return HashMap::new();
@@ -37,4 +33,8 @@ pub fn write_maintainers(map: &HashMap<String, String>) {
     if fs::write(&path, content).is_ok() {
         chown_to_user(&path);
     }
+}
+
+fn maintainers_file() -> Option<PathBuf> {
+    return state_dir().map(|d| d.join("aur_maintainers.json"));
 }

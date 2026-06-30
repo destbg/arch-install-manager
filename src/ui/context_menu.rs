@@ -21,7 +21,13 @@ use crate::ui::package_files_dialog::show_package_files_dialog;
 use crate::ui::package_list::refresh_favorite_button;
 use crate::ui::pkgbuild_review_dialog::show_pkgbuild_review_dialog;
 
-pub fn show_package_context_menu(anchor: &Widget, package: &PackageUpdate, x: f64, y: f64) {
+pub fn show_package_context_menu(
+    anchor: &Widget,
+    package: &PackageUpdate,
+    x: f64,
+    y: f64,
+    installed: bool,
+) {
     let Some(window) = anchor.root().and_downcast::<ApplicationWindow>() else {
         return;
     };
@@ -88,7 +94,7 @@ pub fn show_package_context_menu(anchor: &Widget, package: &PackageUpdate, x: f6
         });
     }
 
-    if !is_external {
+    if installed && !is_external {
         add_action(&vbox, &popover, "View files", {
             let name = package.name.clone();
             let window = window.clone();
@@ -98,56 +104,58 @@ pub fn show_package_context_menu(anchor: &Widget, package: &PackageUpdate, x: f6
         });
     }
 
-    add_separator(&vbox);
+    if installed {
+        add_separator(&vbox);
 
-    let settings = load_settings();
-    let is_favorite = settings.is_favorite(&package.name);
-    add_action(
-        &vbox,
-        &popover,
-        if is_favorite {
-            "Remove from favorites"
-        } else {
-            "Add to favorites"
-        },
-        {
-            let name = package.name.clone();
-            let window = window.clone();
-            move || {
-                toggle_favorite(&window, &name);
-            }
-        },
-    );
-
-    if !is_external {
-        let is_blacklisted = is_in_managed_ignore_pkg(&package.name);
+        let settings = load_settings();
+        let is_favorite = settings.is_favorite(&package.name);
         add_action(
             &vbox,
             &popover,
-            if is_blacklisted {
-                "Remove from blacklist"
+            if is_favorite {
+                "Remove from favorites"
             } else {
-                "Add to blacklist"
+                "Add to favorites"
             },
             {
                 let name = package.name.clone();
                 let window = window.clone();
                 move || {
-                    toggle_blacklist(&window, &name, !is_blacklisted);
+                    toggle_favorite(&window, &name);
                 }
             },
         );
 
-        add_separator(&vbox);
+        if !is_external {
+            let is_blacklisted = is_in_managed_ignore_pkg(&package.name);
+            add_action(
+                &vbox,
+                &popover,
+                if is_blacklisted {
+                    "Remove from blacklist"
+                } else {
+                    "Add to blacklist"
+                },
+                {
+                    let name = package.name.clone();
+                    let window = window.clone();
+                    move || {
+                        toggle_blacklist(&window, &name, !is_blacklisted);
+                    }
+                },
+            );
 
-        add_action(&vbox, &popover, "Downgrade...", {
-            let name = package.name.clone();
-            let current_version = package.current_version.clone();
-            let window = window.clone();
-            move || {
-                show_downgrade_dialog(&window, &name, &current_version);
-            }
-        });
+            add_separator(&vbox);
+
+            add_action(&vbox, &popover, "Downgrade...", {
+                let name = package.name.clone();
+                let current_version = package.current_version.clone();
+                let window = window.clone();
+                move || {
+                    show_downgrade_dialog(&window, &name, &current_version);
+                }
+            });
+        }
     }
 
     popover.set_child(Some(&vbox));
@@ -159,6 +167,20 @@ pub fn show_package_context_menu(anchor: &Widget, package: &PackageUpdate, x: f6
     });
 
     popover.popup();
+}
+
+pub fn reload_package_list(window: &ApplicationWindow) {
+    let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
+        return;
+    };
+    let Some(stack) = main_box.first_child().and_downcast::<gtk4::Stack>() else {
+        return;
+    };
+    let Some(content_box) = stack.child_by_name("content").and_downcast::<GtkBox>() else {
+        return;
+    };
+    stack.set_visible_child_name("loading");
+    load_packages(stack, content_box, window.clone());
 }
 
 fn add_action<F>(parent: &GtkBox, popover: &Popover, label: &str, action: F)
@@ -222,18 +244,4 @@ fn toggle_blacklist(window: &ApplicationWindow, name: &str, add: bool) {
     }
     trigger_check_service();
     reload_package_list(window);
-}
-
-pub fn reload_package_list(window: &ApplicationWindow) {
-    let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
-        return;
-    };
-    let Some(stack) = main_box.first_child().and_downcast::<gtk4::Stack>() else {
-        return;
-    };
-    let Some(content_box) = stack.child_by_name("content").and_downcast::<GtkBox>() else {
-        return;
-    };
-    stack.set_visible_child_name("loading");
-    load_packages(stack, content_box, window.clone());
 }

@@ -90,10 +90,7 @@ pub fn get_flatpak_updates() -> Result<Vec<PackageUpdate>> {
                 .get(3)
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default();
-            let download_size = parts
-                .get(4)
-                .and_then(|s| parse_flatpak_size(s.trim()))
-                .unwrap_or(0);
+            let download_size = parts.get(4).and_then(|s| parse_flatpak_size(s.trim()));
 
             let current_version = installed
                 .get(&key)
@@ -201,6 +198,67 @@ pub fn build_flatpak_update_command(packages: &[&PackageUpdate]) -> Option<Strin
         .filter_map(|p| p.flatpak_installation.map(|inst| (p.name.clone(), inst)))
         .collect();
     return build_flatpak_action_command(&refs, "update");
+}
+
+pub fn search_flatpak(term: &str) -> Vec<PackageUpdate> {
+    if term.trim().is_empty() || !is_flatpak_available() {
+        return Vec::new();
+    }
+
+    let output = Command::new("flatpak")
+        .args([
+            "search",
+            "--columns=application,name,version,description",
+            term,
+        ])
+        .output();
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut out = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed == "No matches found" {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split('\t').collect();
+        let app_id = parts.first().map(|s| s.trim()).unwrap_or("");
+        if app_id.is_empty() {
+            continue;
+        }
+
+        let display_name = parts
+            .get(1)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| app_id.to_string());
+        let version = parts
+            .get(2)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let description = parts
+            .get(3)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| display_name.clone());
+
+        out.push(PackageUpdate {
+            source: PackageSource::Flatpak,
+            repository: PackageSource::Flatpak.label().to_string(),
+            name: app_id.to_string(),
+            description,
+            new_version: version,
+            url: Some(format!("https://flathub.org/apps/{}", app_id)),
+            ..Default::default()
+        });
+    }
+
+    return out;
 }
 
 fn flatpak_command(installation: FlatpakInstallation) -> Command {

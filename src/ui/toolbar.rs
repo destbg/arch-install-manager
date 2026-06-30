@@ -16,7 +16,10 @@ use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
 use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog};
 use crate::ui::history_dialog::show_history_dialog;
-use crate::ui::main_window::{find_favorites_column, find_package_store, load_packages};
+use crate::ipc::client::attach_session;
+use crate::ui::main_window::{
+    find_favorites_column, find_package_store, load_packages, paned_column_view, update_layout,
+};
 use crate::ui::package_list::{save_unselected_from_store, update_statusbar};
 use crate::ui::settings_dialog::show_settings_dialog;
 use crate::ui::vulnerabilities_dialog::show_vulnerabilities_dialog;
@@ -24,8 +27,8 @@ use gio::ListStore;
 use glib::clone;
 use gtk4::prelude::*;
 use gtk4::{
-    ApplicationWindow, Box as GtkBox, Button, ColumnView, FilterListModel, Frame, Image, Label,
-    Orientation, Paned, ScrolledWindow, Separator, SingleSelection, SortListModel, Stack,
+    ApplicationWindow, Box as GtkBox, Button, FilterListModel, Frame, Image, Label,
+    Orientation, Paned, Separator, SingleSelection, SortListModel, Stack,
 };
 use shlex::try_quote as quote;
 use std::collections::HashMap;
@@ -281,7 +284,7 @@ fn find_store_and_statusbar(toolbar: &GtkBox) -> Option<(ListStore, Label)> {
     let Some((_, content_box, _)) = get_navigation_stack(toolbar) else {
         return None;
     };
-    let Some(content_box) = crate::ui::main_window::update_layout(&content_box) else {
+    let Some(content_box) = update_layout(&content_box) else {
         return None;
     };
 
@@ -293,11 +296,7 @@ fn find_store_and_statusbar(toolbar: &GtkBox) -> Option<(ListStore, Label)> {
         return None;
     };
 
-    let Some(scrolled) = paned.start_child().and_downcast::<ScrolledWindow>() else {
-        return None;
-    };
-
-    let Some(column_view) = scrolled.child().and_downcast::<ColumnView>() else {
+    let Some(column_view) = paned_column_view(&paned) else {
         return None;
     };
 
@@ -340,7 +339,7 @@ fn clear_all_selections(store: &ListStore, statusbar: &Label) {
         store.append(&item);
     }
 
-    update_statusbar(statusbar, store);
+    update_statusbar(statusbar, store, "updates");
     save_unselected_from_store(store);
 }
 
@@ -360,7 +359,7 @@ fn select_all_packages(store: &ListStore, statusbar: &Label) {
         store.append(&item);
     }
 
-    update_statusbar(statusbar, store);
+    update_statusbar(statusbar, store, "updates");
     save_unselected_from_store(store);
 }
 
@@ -374,7 +373,7 @@ fn disk_space_warning(store: &ListStore) -> Option<String> {
         if let Some(item) = store.item(i).and_downcast::<PackageUpdateObject>() {
             let data = item.data();
             if data.selected {
-                net += data.size;
+                net += data.size.unwrap_or(0);
             }
         }
     }
@@ -437,7 +436,7 @@ fn run_install(
     create_snapshot: bool,
     create_snapper: bool,
 ) {
-    let _ = crate::ipc::client::attach_session();
+    let _ = attach_session();
     if let Err(e) = install_selected_packages_ui(store, window, create_snapshot, create_snapper) {
         log_info!("install failed: {}", e);
         eprintln!("Failed to install packages: {}", e);

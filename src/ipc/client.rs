@@ -9,57 +9,18 @@ use crate::ipc::protocol::{
     Op, Request, Response, read_response, send_request, socket_path_for_uid,
 };
 
-fn current_uid() -> u32 {
-    return unsafe { libc::geteuid() };
-}
-
-fn current_gid() -> u32 {
-    return unsafe { libc::getegid() };
-}
-
-fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("DAIM_HELPER_SOCKET") {
-        return PathBuf::from(p);
-    }
-    return socket_path_for_uid(current_uid());
-}
-
-fn connect() -> io::Result<UnixStream> {
-    return UnixStream::connect(socket_path());
-}
-
-fn ping() -> bool {
-    let Ok(stream) = connect() else {
-        return false;
-    };
-    if send_request(&stream, &request(Op::Ping), &[]).is_err() {
-        return false;
-    }
-    let mut stream = stream;
-    return matches!(read_response(&mut stream), Ok(Response::Pong));
-}
-
-fn request(op: Op) -> Request {
-    let with_tty = op.wants_tty();
-    return Request { op, with_tty };
-}
-
 static LAUNCH_LOCK: Mutex<()> = Mutex::new(());
 
 static LAUNCHER: Mutex<Option<String>> = Mutex::new(None);
 
-pub fn set_launcher(launcher: &str) {
-    *LAUNCHER.lock().unwrap() = Some(launcher.to_string());
+pub struct HelperHandle {
+    _stream: UnixStream,
 }
 
-fn resolve_launcher() -> String {
-    if let Ok(env) = std::env::var("DAIM_HELPER_LAUNCHER") {
-        return env;
-    }
-    if let Some(launcher) = LAUNCHER.lock().unwrap().clone() {
-        return launcher;
-    }
-    return "pkexec".to_string();
+static SESSION: Mutex<Option<HelperHandle>> = Mutex::new(None);
+
+pub fn set_launcher(launcher: &str) {
+    *LAUNCHER.lock().unwrap() = Some(launcher.to_string());
 }
 
 pub fn ensure_running() -> io::Result<()> {
@@ -125,10 +86,6 @@ pub fn ensure_running() -> io::Result<()> {
     }
 }
 
-pub struct HelperHandle {
-    _stream: UnixStream,
-}
-
 pub fn attach() -> io::Result<HelperHandle> {
     ensure_running()?;
     let stream = connect()?;
@@ -157,8 +114,6 @@ pub fn set_ignore_pkg(name: &str, ignored: bool) -> io::Result<Response> {
     });
 }
 
-static SESSION: Mutex<Option<HelperHandle>> = Mutex::new(None);
-
 pub fn attach_session() -> io::Result<()> {
     let mut session = SESSION.lock().unwrap();
     if session.is_some() {
@@ -166,4 +121,49 @@ pub fn attach_session() -> io::Result<()> {
     }
     *session = Some(attach()?);
     return Ok(());
+}
+
+fn current_uid() -> u32 {
+    return unsafe { libc::geteuid() };
+}
+
+fn current_gid() -> u32 {
+    return unsafe { libc::getegid() };
+}
+
+fn socket_path() -> PathBuf {
+    if let Ok(p) = std::env::var("DAIM_HELPER_SOCKET") {
+        return PathBuf::from(p);
+    }
+    return socket_path_for_uid(current_uid());
+}
+
+fn connect() -> io::Result<UnixStream> {
+    return UnixStream::connect(socket_path());
+}
+
+fn ping() -> bool {
+    let Ok(stream) = connect() else {
+        return false;
+    };
+    if send_request(&stream, &request(Op::Ping), &[]).is_err() {
+        return false;
+    }
+    let mut stream = stream;
+    return matches!(read_response(&mut stream), Ok(Response::Pong));
+}
+
+fn request(op: Op) -> Request {
+    let with_tty = op.wants_tty();
+    return Request { op, with_tty };
+}
+
+fn resolve_launcher() -> String {
+    if let Ok(env) = std::env::var("DAIM_HELPER_LAUNCHER") {
+        return env;
+    }
+    if let Some(launcher) = LAUNCHER.lock().unwrap().clone() {
+        return launcher;
+    }
+    return "pkexec".to_string();
 }

@@ -13,6 +13,8 @@ use nix::sys::socket::getsockopt;
 use nix::sys::socket::sockopt::PeerCredentials;
 use nix::unistd::{Gid, Uid, chown};
 
+use crate::helpers::database_lock::remove_database_lock;
+use crate::helpers::pacman_ignore::{add_to_ignore_pkg, remove_from_ignore_pkg};
 use crate::ipc::protocol::{MirrorTool, Op, Request, Response, recv_request, write_response};
 
 pub struct Config {
@@ -26,12 +28,6 @@ static ATTACHED: AtomicBool = AtomicBool::new(false);
 static LAST_ACTIVITY: Mutex<Option<Instant>> = Mutex::new(None);
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(900);
-
-fn touch_activity() {
-    if let Ok(mut guard) = LAST_ACTIVITY.lock() {
-        *guard = Some(Instant::now());
-    }
-}
 
 pub fn run(config: Config) -> io::Result<()> {
     if let Some(dir) = config.socket_path.parent() {
@@ -66,6 +62,12 @@ pub fn run(config: Config) -> io::Result<()> {
         std::thread::spawn(move || handle_connection(stream, authorized));
     }
     return Ok(());
+}
+
+fn touch_activity() {
+    if let Ok(mut guard) = LAST_ACTIVITY.lock() {
+        *guard = Some(Instant::now());
+    }
 }
 
 fn spawn_idle_watchdog(socket_path: PathBuf) {
@@ -197,16 +199,16 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
                 return Response::error(e);
             }
             let result = if *ignored {
-                crate::helpers::pacman_ignore::add_to_ignore_pkg(name)
+                add_to_ignore_pkg(name)
             } else {
-                crate::helpers::pacman_ignore::remove_from_ignore_pkg(name)
+                remove_from_ignore_pkg(name)
             };
             match result {
                 Ok(()) => done_ok(),
                 Err(e) => Response::error(e.to_string()),
             }
         }
-        Op::RemoveDbLock => match crate::helpers::database_lock::remove_database_lock() {
+        Op::RemoveDbLock => match remove_database_lock() {
             Ok(()) => done_ok(),
             Err(e) => Response::error(e.to_string()),
         },

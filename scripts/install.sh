@@ -14,10 +14,12 @@ if [[ "${1:-}" == "-u" || "${1:-}" == "--uninstall" ]]; then
     systemctl --user disable --now daim-tray.service 2>/dev/null || true
     sudo rm -f /usr/bin/daim /usr/bin/daim-gui /usr/bin/daim-helper /usr/bin/daim-tray /usr/bin/daim-check
     sudo rm -f /usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy
+    sudo rm -f /usr/share/polkit-1/rules.d/49-daim-check.rules
     sudo rm -f /usr/share/applications/arch-install-manager.desktop
     sudo rm -f /usr/lib/systemd/system/daim-check.service /usr/lib/systemd/system/daim-check.timer
     sudo rm -f /usr/lib/systemd/user/daim-tray.service
     sudo rm -f /usr/share/icons/hicolor/*/apps/arch-install-manager.png
+    sudo rm -f /usr/share/icons/hicolor/symbolic/apps/arch-install-manager-*-symbolic.svg
     sudo systemctl daemon-reload
     ok "removed"
     exit 0
@@ -33,12 +35,20 @@ for b in daim daim-gui daim-helper daim-tray daim-check; do
 done
 sudo install -Dm644 com.destbg.arch-install-manager.policy \
     /usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy
+sudo install -Dm644 res/polkit/49-daim-check.rules \
+    /usr/share/polkit-1/rules.d/49-daim-check.rules
 sudo install -Dm644 arch-install-manager.desktop \
     /usr/share/applications/arch-install-manager.desktop
 for size in 48x48 256x256 512x512; do
     if [[ -f "icons/$size/apps/arch-install-manager.png" ]]; then
         sudo install -Dm644 "icons/$size/apps/arch-install-manager.png" \
             "/usr/share/icons/hicolor/$size/apps/arch-install-manager.png"
+    fi
+done
+for sym in arch-install-manager-arch-symbolic arch-install-manager-flatpak-symbolic; do
+    if [[ -f "icons/symbolic/apps/$sym.svg" ]]; then
+        sudo install -Dm644 "icons/symbolic/apps/$sym.svg" \
+            "/usr/share/icons/hicolor/symbolic/apps/$sym.svg"
     fi
 done
 if command -v gtk-update-icon-cache >/dev/null; then
@@ -56,7 +66,8 @@ sudo install -Dm644 res/systemd/daim-tray.service /usr/lib/systemd/user/daim-tra
 sudo systemctl daemon-reload
 systemctl --user daemon-reload
 sudo systemctl enable --now daim-check.timer 2>/dev/null && ok "root check timer enabled" || true
-systemctl --user enable --now daim-tray.service 2>/dev/null && ok "user tray service enabled" || true
+systemctl --user enable daim-tray.service 2>/dev/null || true
+systemctl --user restart daim-tray.service 2>/dev/null && ok "user tray service (re)started with the new binary" || true
 
 step "Launching daim-gui"
 daim-gui

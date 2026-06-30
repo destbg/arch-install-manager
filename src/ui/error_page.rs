@@ -98,6 +98,43 @@ pub fn create_error_page() -> GtkBox {
     return error_box;
 }
 
+pub fn update_error_page_message(error_box: &GtkBox, error_message: &str) {
+    let mut child = error_box.first_child();
+    for _ in 0..3 {
+        if let Some(next) = child.as_ref().and_then(|c| c.next_sibling()) {
+            child = Some(next);
+        } else {
+            return;
+        }
+    }
+
+    if let Some(frame) = child.and_then(|c| c.downcast::<gtk4::Frame>().ok()) {
+        if let Some(scrolled) = frame.child().and_downcast::<ScrolledWindow>() {
+            if let Some(text_view) = scrolled.child().and_downcast::<TextView>() {
+                let buffer = text_view.buffer();
+                buffer.set_text(error_message);
+            }
+        }
+    }
+
+    let lock_error = is_lock_error(error_message);
+
+    let mut child = error_box.first_child();
+    for _ in 0..4 {
+        if let Some(next) = child.as_ref().and_then(|c| c.next_sibling()) {
+            child = Some(next);
+        } else {
+            return;
+        }
+    }
+
+    if let Some(button_box) = child.and_downcast::<GtkBox>() {
+        if let Some(remove_lock_btn) = button_box.first_child().and_downcast::<Button>() {
+            remove_lock_btn.set_visible(lock_error);
+        }
+    }
+}
+
 fn handle_retry_click(error_box: &GtkBox) {
     let Some((stack, content_box, window)) = get_navigation_stack(error_box) else {
         return;
@@ -132,43 +169,6 @@ fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: 
                     &error_msg,
                 );
             }
-        }
-    }
-}
-
-pub fn update_error_page_message(error_box: &GtkBox, error_message: &str) {
-    let mut child = error_box.first_child();
-    for _ in 0..3 {
-        if let Some(next) = child.as_ref().and_then(|c| c.next_sibling()) {
-            child = Some(next);
-        } else {
-            return;
-        }
-    }
-
-    if let Some(frame) = child.and_then(|c| c.downcast::<gtk4::Frame>().ok()) {
-        if let Some(scrolled) = frame.child().and_downcast::<ScrolledWindow>() {
-            if let Some(text_view) = scrolled.child().and_downcast::<TextView>() {
-                let buffer = text_view.buffer();
-                buffer.set_text(error_message);
-            }
-        }
-    }
-
-    let lock_error = is_lock_error(error_message);
-
-    let mut child = error_box.first_child();
-    for _ in 0..4 {
-        if let Some(next) = child.as_ref().and_then(|c| c.next_sibling()) {
-            child = Some(next);
-        } else {
-            return;
-        }
-    }
-
-    if let Some(button_box) = child.and_downcast::<GtkBox>() {
-        if let Some(remove_lock_btn) = button_box.first_child().and_downcast::<Button>() {
-            remove_lock_btn.set_visible(lock_error);
         }
     }
 }

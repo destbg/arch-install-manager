@@ -130,7 +130,7 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
                 description,
                 repository,
                 selected: true,
-                size,
+                size: Some(size),
                 url,
                 build_date,
                 first_submitted: None,

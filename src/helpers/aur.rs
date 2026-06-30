@@ -69,6 +69,121 @@ pub fn get_aur_updates() -> Result<Vec<PackageUpdate>> {
     return Ok(updates);
 }
 
+pub fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
+    let mut map = HashMap::new();
+    if names.is_empty() {
+        return map;
+    }
+
+    let url = aur_rpc_info_url(names);
+    let Ok(body) = http_get(&url, AUR_RPC_TIMEOUT_SECS) else {
+        return map;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return map;
+    };
+    let Some(results) = json.get("results").and_then(|r| r.as_array()) else {
+        return map;
+    };
+
+    for entry in results {
+        let Some(name) = entry.get("Name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        let str_field = |key: &str| {
+            entry
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
+        map.insert(
+            name.to_string(),
+            AurInfo {
+                version: str_field("Version"),
+                description: str_field("Description"),
+                url: str_field("URL"),
+                last_modified: entry.get("LastModified").and_then(|v| v.as_i64()),
+                first_submitted: entry.get("FirstSubmitted").and_then(|v| v.as_i64()),
+                out_of_date: entry.get("OutOfDate").and_then(|v| v.as_i64()),
+                maintainer: str_field("Maintainer"),
+                num_votes: entry.get("NumVotes").and_then(|v| v.as_i64()),
+                popularity: entry.get("Popularity").and_then(|v| v.as_f64()),
+            },
+        );
+    }
+
+    return map;
+}
+
+pub fn search_aur_packages(term: &str) -> Vec<PackageUpdate> {
+    if term.trim().is_empty() {
+        return Vec::new();
+    }
+    let url = format!(
+        "https://aur.archlinux.org/rpc/v5/search/{}",
+        url_encode(term)
+    );
+    let Ok(body) = http_get(&url, AUR_RPC_TIMEOUT_SECS) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return Vec::new();
+    };
+    let Some(results) = json.get("results").and_then(|r| r.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for entry in results {
+        let name = entry
+            .get("Name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let str_field = |key: &str| {
+            entry
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
+        let maintainer = str_field("Maintainer");
+        out.push(PackageUpdate {
+            source: PackageSource::Aur,
+            repository: PackageSource::Aur.label().to_string(),
+            new_version: str_field("Version").unwrap_or_default(),
+            description: str_field("Description").unwrap_or_default(),
+            url: str_field("URL")
+                .or_else(|| Some(format!("https://aur.archlinux.org/packages/{}", name))),
+            build_date: entry.get("LastModified").and_then(|v| v.as_i64()),
+            first_submitted: entry.get("FirstSubmitted").and_then(|v| v.as_i64()),
+            out_of_date: entry.get("OutOfDate").and_then(|v| v.as_i64()),
+            orphaned: maintainer.is_none(),
+            maintainer,
+            num_votes: entry.get("NumVotes").and_then(|v| v.as_i64()),
+            popularity: entry.get("Popularity").and_then(|v| v.as_f64()),
+            name,
+            ..Default::default()
+        });
+    }
+    return out;
+}
+
+pub(crate) fn url_encode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    return out;
+}
+
 fn new_aur_update(name: &str, current_version: &str, new_version: &str) -> PackageUpdate {
     return PackageUpdate {
         source: PackageSource::Aur,
@@ -78,7 +193,7 @@ fn new_aur_update(name: &str, current_version: &str, new_version: &str) -> Packa
         description: format!("AUR package: {}", name),
         current_version: current_version.to_string(),
         new_version: new_version.to_string(),
-        size: 0,
+        size: None,
         url: Some(format!("https://aur.archlinux.org/packages/{}", name)),
         build_date: None,
         first_submitted: None,
@@ -97,19 +212,6 @@ fn new_aur_update(name: &str, current_version: &str, new_version: &str) -> Packa
         flatpak_installation: None,
         appimage_path: None,
     };
-}
-
-pub(crate) fn url_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    return out;
 }
 
 fn enrich_with_aur_info(updates: &mut [PackageUpdate]) {
@@ -166,95 +268,6 @@ fn enrich_with_aur_info(updates: &mut [PackageUpdate]) {
     if maintainers_changed {
         write_maintainers(&known_maintainers);
     }
-}
-
-pub fn fetch_aur_info(names: &[&str]) -> HashMap<String, AurInfo> {
-    let mut map = HashMap::new();
-    if names.is_empty() {
-        return map;
-    }
-
-    let url = aur_rpc_info_url(names);
-    let Ok(body) = http_get(&url, AUR_RPC_TIMEOUT_SECS) else {
-        return map;
-    };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
-        return map;
-    };
-    let Some(results) = json.get("results").and_then(|r| r.as_array()) else {
-        return map;
-    };
-
-    for entry in results {
-        let Some(name) = entry.get("Name").and_then(|n| n.as_str()) else {
-            continue;
-        };
-        let str_field = |key: &str| {
-            entry
-                .get(key)
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        };
-        map.insert(
-            name.to_string(),
-            AurInfo {
-                version: str_field("Version"),
-                description: str_field("Description"),
-                url: str_field("URL"),
-                last_modified: entry.get("LastModified").and_then(|v| v.as_i64()),
-                first_submitted: entry.get("FirstSubmitted").and_then(|v| v.as_i64()),
-                out_of_date: entry.get("OutOfDate").and_then(|v| v.as_i64()),
-                maintainer: str_field("Maintainer"),
-                num_votes: entry.get("NumVotes").and_then(|v| v.as_i64()),
-                popularity: entry.get("Popularity").and_then(|v| v.as_f64()),
-            },
-        );
-    }
-
-    return map;
-}
-
-pub fn search_aur(term: &str) -> Vec<(String, String, String)> {
-    if term.trim().is_empty() {
-        return Vec::new();
-    }
-    let url = format!(
-        "https://aur.archlinux.org/rpc/v5/search/{}",
-        url_encode(term)
-    );
-    let Ok(body) = http_get(&url, AUR_RPC_TIMEOUT_SECS) else {
-        return Vec::new();
-    };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else {
-        return Vec::new();
-    };
-    let Some(results) = json.get("results").and_then(|r| r.as_array()) else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
-    for entry in results {
-        let name = entry
-            .get("Name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if name.is_empty() {
-            continue;
-        }
-        let version = entry
-            .get("Version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let description = entry
-            .get("Description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        out.push((name, version, description));
-    }
-    return out;
 }
 
 fn aur_rpc_info_url(names: &[&str]) -> String {

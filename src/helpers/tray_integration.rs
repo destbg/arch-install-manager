@@ -12,7 +12,9 @@ const TRAY_SERVICE: &str = "daim-tray.service";
 
 pub fn trigger_check_service() {
     std::thread::spawn(|| {
-        run_user_systemctl(&["start", CHECK_SERVICE]);
+        let _ = Command::new("systemctl")
+            .args(["start", CHECK_SERVICE])
+            .status();
     });
 }
 
@@ -26,10 +28,8 @@ pub fn apply_tray_state(enabled: bool) {
     remove_legacy_autostart_file();
 
     if enabled {
-        run_user_systemctl(&["enable", "--now", TIMER_UNIT]);
         run_user_systemctl(&["enable", "--now", TRAY_SERVICE]);
     } else {
-        run_user_systemctl(&["disable", "--now", TIMER_UNIT]);
         run_user_systemctl(&["disable", "--now", TRAY_SERVICE]);
     }
 }
@@ -44,9 +44,13 @@ pub fn apply_check_schedule(schedule: CheckSchedule) {
 }
 
 pub fn has_systemd_user_session() -> bool {
-    let Some(uid) = original_user_uid() else {
-        return false;
-    };
+    if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        if !runtime.is_empty() && PathBuf::from(&runtime).join("systemd").exists() {
+            return true;
+        }
+    }
+
+    let uid = original_user_uid().unwrap_or_else(|| unsafe { libc::geteuid() }.to_string());
     return PathBuf::from(format!("/run/user/{}/systemd", uid)).exists();
 }
 

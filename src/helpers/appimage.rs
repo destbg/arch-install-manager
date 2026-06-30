@@ -116,7 +116,7 @@ pub fn get_appimage_updates() -> Result<Vec<PackageUpdate>> {
             continue;
         }
 
-        let size = target_length.max(0);
+        let size = Some(target_length.max(0));
 
         updates.push(PackageUpdate {
             source: PackageSource::AppImage,

@@ -28,6 +28,7 @@ pub mod package_update;
 pub mod pkgbuild_review;
 pub mod post_update_page;
 pub mod repo_switch;
+pub mod search_sources;
 pub mod section;
 pub mod section_visibility;
 pub mod security_fix;

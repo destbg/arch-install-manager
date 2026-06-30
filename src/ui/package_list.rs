@@ -44,6 +44,8 @@ pub fn refresh_all_favorite_buttons(is_favorite: bool) {
 
 pub fn create_package_list(
     search_entry: &SearchEntry,
+    noun: &str,
+    installed: bool,
 ) -> (ColumnView, ListStore, Label, CustomFilter) {
     let store = ListStore::new::<PackageUpdateObject>();
     let statusbar = Label::new(None);
@@ -83,15 +85,15 @@ pub fn create_package_list(
 
     create_favorite_column(&column_view);
     create_repository_column(&column_view);
-    create_upgrade_column(&column_view, &store, &statusbar);
-    create_name_column(&column_view);
+    create_upgrade_column(&column_view, &store, &statusbar, noun);
+    create_name_column(&column_view, installed);
     create_version_column(&column_view);
     create_size_column(&column_view);
 
     return (column_view, store, statusbar, filter);
 }
 
-pub fn update_statusbar(statusbar: &Label, store: &ListStore) {
+pub fn update_statusbar(statusbar: &Label, store: &ListStore, noun: &str) {
     let n_items = store.n_items();
     let mut selected_count = 0;
     let mut total_size = 0i64;
@@ -101,7 +103,7 @@ pub fn update_statusbar(statusbar: &Label, store: &ListStore) {
             let data = item.data();
             if data.selected {
                 selected_count += 1;
-                total_size += data.size;
+                total_size += data.size.unwrap_or(0);
             }
         }
     }
@@ -112,9 +114,9 @@ pub fn update_statusbar(statusbar: &Label, store: &ListStore) {
         } else {
             format_size(total_size as u64).to_string()
         };
-        format!("{} updates selected ({})", selected_count, size_text)
+        format!("{} {} selected ({})", selected_count, noun, size_text)
     } else {
-        format!("{} updates selected", selected_count)
+        format!("{} {} selected", selected_count, noun)
     };
 
     statusbar.set_text(&status_text);
@@ -518,10 +520,11 @@ fn create_repository_column(column_view: &ColumnView) {
     column_view.append_column(&repository_column);
 }
 
-fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar: &Label) {
+fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar: &Label, noun: &str) {
     let upgrade_factory = gtk4::SignalListItemFactory::new();
     let shift_held: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     let last_anchor: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(None));
+    let noun = noun.to_string();
 
     upgrade_factory.connect_setup(clone!(
         #[strong]
@@ -534,6 +537,8 @@ fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar:
         last_anchor,
         #[strong]
         column_view,
+        #[strong]
+        noun,
         move |_factory, item| {
             let list_item = item.downcast_ref::<ListItem>().unwrap().clone();
             let check = CheckButton::new();
@@ -561,6 +566,8 @@ fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar:
                 last_anchor,
                 #[strong]
                 column_view,
+                #[strong]
+                noun,
                 move |check| {
                     let Some(obj) = list_item.item().and_downcast::<PackageUpdateObject>() else {
                         return;
@@ -595,7 +602,7 @@ fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar:
                         *last_anchor.borrow_mut() = Some(current_pos);
                     }
 
-                    update_statusbar(&statusbar, &store);
+                    update_statusbar(&statusbar, &store, &noun);
                     save_unselected_from_store(&store);
                 }
             ));
@@ -703,7 +710,7 @@ fn apply_favorite_range(
     }
 }
 
-fn create_name_column(column_view: &ColumnView) {
+fn create_name_column(column_view: &ColumnView, installed: bool) {
     let name_factory = gtk4::SignalListItemFactory::new();
     let column_view_for_gesture = column_view.clone();
     name_factory.connect_setup(move |_factory, item| {
@@ -743,7 +750,13 @@ fn create_name_column(column_view: &ColumnView) {
             let Some(pkg) = row_package_for_gesture.borrow().clone() else {
                 return;
             };
-            show_package_context_menu(vbox_for_gesture.upcast_ref::<gtk4::Widget>(), &pkg, x, y);
+            show_package_context_menu(
+                vbox_for_gesture.upcast_ref::<gtk4::Widget>(),
+                &pkg,
+                x,
+                y,
+                installed,
+            );
         });
         vbox.add_controller(gesture);
         unsafe {
@@ -881,17 +894,18 @@ fn create_size_column(column_view: &ColumnView) {
         let data = obj.data();
         let label = list_item.child().and_downcast::<Label>().unwrap();
 
-        let size_text = if data.size < 0 {
-            format!("-{}", format_size(data.size.unsigned_abs()))
-        } else {
-            format_size(data.size as u64).to_string()
+        let size_text = match data.size {
+            None => String::new(),
+            Some(0) => "0".to_string(),
+            Some(value) if value < 0 => format!("-{}", format_size(value.unsigned_abs())),
+            Some(value) => format_size(value as u64).to_string(),
         };
         label.set_text(&size_text);
     });
     let size_column = ColumnViewColumn::new(Some("Update Size"), Some(size_factory));
     size_column.set_fixed_width(100);
     size_column.set_sorter(Some(&package_sorter(|a, b| {
-        return a.data().size.cmp(&b.data().size);
+        return a.data().size.unwrap_or(0).cmp(&b.data().size.unwrap_or(0));
     })));
     column_view.append_column(&size_column);
 }

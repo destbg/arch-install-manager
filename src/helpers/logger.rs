@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use crate::helpers::elevated::chown_to_user;
+use crate::helpers::elevated::{chown_to_user, spawn_as_user_or_root};
 use crate::models::log_file::LogFile;
 use crate::models::log_level::LogLevel;
 
@@ -139,7 +139,7 @@ pub fn open_logs_folder() {
         let _ = fs::create_dir_all(&dir);
         chown_to_user(&dir);
     }
-    crate::helpers::elevated::spawn_as_user_or_root("xdg-open", &[&dir.to_string_lossy()]);
+    spawn_as_user_or_root("xdg-open", &[&dir.to_string_lossy()]);
 }
 
 #[macro_export]

@@ -51,6 +51,9 @@ package() {
 	install -Dm644 "com.destbg.arch-install-manager.policy" \
 		"$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
 
+	install -Dm644 "res/polkit/49-daim-check.rules" \
+		"$pkgdir/usr/share/polkit-1/rules.d/49-daim-check.rules"
+
 	install -Dm644 "res/systemd/daim-check.service" \
 		"$pkgdir/usr/lib/systemd/system/daim-check.service"
 	install -Dm644 "res/systemd/daim-check.timer" \
@@ -62,6 +65,13 @@ package() {
 		if [ -f "icons/$size/apps/arch-install-manager.png" ]; then
 			install -Dm644 "icons/$size/apps/arch-install-manager.png" \
 				"$pkgdir/usr/share/icons/hicolor/$size/apps/arch-install-manager.png"
+		fi
+	done
+
+	for sym in arch-install-manager-arch-symbolic arch-install-manager-flatpak-symbolic; do
+		if [ -f "icons/symbolic/apps/$sym.svg" ]; then
+			install -Dm644 "icons/symbolic/apps/$sym.svg" \
+				"$pkgdir/usr/share/icons/hicolor/symbolic/apps/$sym.svg"
 		fi
 	done
 

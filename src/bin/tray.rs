@@ -12,7 +12,10 @@ use ksni::{MenuItem, Status, ToolTip, Tray};
 use signal_hook::consts::SIGUSR1;
 use signal_hook::iterator::Signals;
 
+use arch_install_manager::helpers::appimage::get_appimage_updates;
+use arch_install_manager::helpers::flatpak::get_flatpak_updates;
 use arch_install_manager::helpers::settings::{load_settings, reload_settings, save_settings};
+use arch_install_manager::helpers::tray_integration::trigger_check_service;
 use arch_install_manager::helpers::snooze::{clear_snooze, current_snooze_until, set_snooze};
 use arch_install_manager::helpers::tray_state::state_file;
 use arch_install_manager::models::app_settings::AppSettings;
@@ -38,12 +41,7 @@ impl ArchUpdateTray {
 
     fn run_check(&self) {
         self.expect_check_notification.store(true, Ordering::SeqCst);
-        if let Err(e) = std::process::Command::new("daim-check")
-            .arg("--manual")
-            .status()
-        {
-            eprintln!("Failed to trigger check: {}", e);
-        }
+        trigger_check_service();
     }
 
     fn visible_total(&self) -> usize {
@@ -529,6 +527,26 @@ fn read_state(path: &PathBuf) -> TrayState {
     return serde_json::from_str(&content).unwrap_or_default();
 }
 
+fn augment_local_updates(state: &mut TrayState, settings: &AppSettings) {
+    if settings.enable_flatpak_support {
+        if let Ok(updates) = get_flatpak_updates() {
+            state.flatpak = updates
+                .iter()
+                .map(|u| format!("{} {} -> {}", u.name, u.current_version, u.new_version))
+                .collect();
+        }
+    }
+    if settings.enable_appimage_support {
+        if let Ok(updates) = get_appimage_updates() {
+            state.appimage = updates
+                .iter()
+                .map(|u| format!("{} {} -> {}", u.name, u.current_version, u.new_version))
+                .collect();
+        }
+    }
+    return;
+}
+
 fn main() {
     let path = match state_file() {
         Some(p) => p,
@@ -541,11 +559,7 @@ fn main() {
     let initial_state = read_state(&path);
     let expect_check_notification = Arc::new(AtomicBool::new(false));
 
-    thread::spawn(|| {
-        if let Err(e) = std::process::Command::new("daim-check").status() {
-            eprintln!("Failed to run initial check on tray startup: {}", e);
-        }
-    });
+    trigger_check_service();
 
     let tray = ArchUpdateTray {
         state: initial_state.clone(),
@@ -593,7 +607,8 @@ fn main() {
     thread::spawn(move || {
         while rx.recv().is_ok() {
             let settings = reload_settings();
-            let new_state = read_state(&path_clone);
+            let mut new_state = read_state(&path_clone);
+            augment_local_updates(&mut new_state, &settings);
 
             let only_favorites = settings.enable_favorites
                 && (settings.tray_only_favorites || settings.tray_menu_only_favorites);

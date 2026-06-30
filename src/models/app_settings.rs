@@ -85,6 +85,12 @@ pub struct AppSettings {
     pub check_arch_news: bool,
     #[serde(default = "default_enable_mirror_refresh")]
     pub enable_mirror_refresh: bool,
+    #[serde(default = "default_true")]
+    pub install_search_official: bool,
+    #[serde(default = "default_true")]
+    pub install_search_aur: bool,
+    #[serde(default)]
+    pub install_search_flatpak: bool,
 }
 
 impl AppSettings {
@@ -160,5 +166,9 @@ fn default_check_arch_news() -> bool {
 }
 
 fn default_enable_mirror_refresh() -> bool {
+    return true;
+}
+
+fn default_true() -> bool {
     return true;
 }
