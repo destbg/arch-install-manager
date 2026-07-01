@@ -2,7 +2,7 @@
 
 Arch Install Manager (daim) is an app for Arch Linux that helps you install, update and manage your software. It gives you a simple window, much like the Software Manager in Linux Mint. It also comes with a terminal command that does the same things.
 
-**This is an early beta. Expect some bugs and sudden big changes between version.**
+**This is an early beta. Expect bugs and sudden big changes between version.**
 
 ![Arch Install Manager](showcase.png)
 
@@ -28,13 +28,13 @@ Build and install it from source.
 Or install it from the AUR with the helper you already use.
 
 ```bash
-paru arch-install-manager
+paru arch-install-manager-git
 ```
 
 There are three versions to pick from.
 
-- arch-install-manager builds from the latest stable release.
-- arch-install-manager-bin installs a ready made build of that release.
+- arch-install-manager builds from the latest stable release. (not released yet)
+- arch-install-manager-bin installs a ready made build of that release. (not released yet)
 - arch-install-manager-git builds from the newest code.
 
 ## License
