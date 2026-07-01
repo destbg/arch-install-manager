@@ -33,7 +33,7 @@ fn main() {
                     other => pkgs.push(other.to_string()),
                 }
             }
-            exit(engine::install(&pkgs, skip_review, reinstall));
+            exit(engine::install(&pkgs, skip_review, reinstall, true));
         }
         "search" | "s" | "query" | "q" => {
             let mut select = true;

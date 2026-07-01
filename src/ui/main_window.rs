@@ -7,7 +7,6 @@ use crate::helpers::mirrors::{is_mirrorlist_stale, mirror_refresh_command, mirro
 use crate::helpers::package_updates::get_package_updates;
 use crate::helpers::pacman_ignore::{is_in_managed_ignore_pkg, list_managed_ignores};
 use crate::helpers::release_notes::release_notes_url;
-use crate::helpers::repo_switches::detect_switch_updates;
 use crate::helpers::search::{featured_packages, search_packages};
 use crate::helpers::settings::{load_settings, save_settings};
 use crate::helpers::tray_integration::trigger_check_service;
@@ -40,8 +39,9 @@ use gio::ListStore;
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Button, ColumnView, ColumnViewColumn,
-    FilterListModel, HeaderBar, Orientation, Paned, ScrolledWindow, SearchBar, SearchEntry,
-    Separator, SingleSelection, SortListModel, Stack, StackSwitcher, ToggleButton,
+    EventControllerKey, FilterListModel, HeaderBar, Orientation, Paned, PropagationPhase,
+    ScrolledWindow, SearchBar, SearchEntry, Separator, SingleSelection, SortListModel, Stack,
+    StackSwitcher, ToggleButton,
 };
 use shlex::try_quote;
 use std::cell::RefCell;
@@ -49,6 +49,14 @@ use std::cell::RefCell;
 thread_local! {
     pub static POST_UPDATE_PAGE: RefCell<Option<PostUpdatePage>> = RefCell::new(None);
     static UPDATE_LOADING: RefCell<Option<(GtkBox, gtk4::Spinner)>> = RefCell::new(None);
+    static MANAGE_REFRESH: RefCell<Option<std::rc::Rc<dyn Fn()>>> = RefCell::new(None);
+}
+
+pub fn refresh_manage_list() {
+    let callback = MANAGE_REFRESH.with(|cell| cell.borrow().clone());
+    if let Some(callback) = callback {
+        callback();
+    }
 }
 
 pub fn build_ui(app: &Application) {
@@ -186,9 +194,6 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
     show_update_loading(true);
     glib::spawn_future_local(async move {
         let packages_result = gio::spawn_blocking(|| get_package_updates()).await;
-        let switches = gio::spawn_blocking(detect_switch_updates)
-            .await
-            .unwrap_or_default();
         show_update_loading(false);
 
         match packages_result {
@@ -212,14 +217,6 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                             None => true,
                         }
                     });
-                }
-
-                let existing: std::collections::HashSet<String> =
-                    packages.iter().map(|p| p.name.clone()).collect();
-                for switch in switches {
-                    if !existing.contains(&switch.name) {
-                        packages.push(switch);
-                    }
                 }
 
                 if packages.is_empty() {
@@ -509,8 +506,11 @@ fn build_update_tab(
 
     {
         let filter = filter.clone();
+        let list_view = list_view.clone();
         search_entry.connect_search_changed(move |_| {
+            let previous = selected_package_name(&list_view);
             filter.changed(gtk4::FilterChange::Different);
+            hide_info_if_package_gone(&list_view, previous);
         });
     }
 
@@ -834,6 +834,46 @@ fn attach_info_panel(list_view: &ColumnView, info_panel: &InfoPanel) {
     return;
 }
 
+fn selected_package_name(list_view: &ColumnView) -> Option<String> {
+    let selection = list_view.model().and_downcast::<SingleSelection>()?;
+    let obj = selection
+        .selected_item()
+        .and_downcast::<PackageUpdateObject>()?;
+    return Some(obj.data().name);
+}
+
+fn clear_list_selection(list_view: &ColumnView) {
+    if let Some(selection) = list_view.model().and_downcast::<SingleSelection>() {
+        selection.set_selected(gtk4::INVALID_LIST_POSITION);
+    }
+}
+
+fn package_in_list(list_view: &ColumnView, name: &str) -> bool {
+    let Some(selection) = list_view.model().and_downcast::<SingleSelection>() else {
+        return false;
+    };
+    let Some(model) = selection.model() else {
+        return false;
+    };
+    for i in 0..model.n_items() {
+        if let Some(obj) = model.item(i).and_downcast::<PackageUpdateObject>() {
+            if obj.data().name == name {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn hide_info_if_package_gone(list_view: &ColumnView, previous: Option<String>) {
+    let Some(name) = previous else {
+        return;
+    };
+    if !package_in_list(list_view, &name) {
+        clear_list_selection(list_view);
+    }
+}
+
 fn create_main_content(
     decorations_disabled: bool,
     stack: &Stack,
@@ -1048,7 +1088,9 @@ fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
     {
         let run = run_search.clone();
         let loaded = std::rc::Rc::new(std::cell::Cell::new(false));
+        let list_view = list_view.clone();
         tab.connect_map(move |_| {
+            list_view.grab_focus();
             if !loaded.replace(true) {
                 run();
             }
@@ -1057,9 +1099,10 @@ fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
 
     {
         let run = run_search.clone();
+        let list_view = list_view.clone();
         search_entry.connect_activate(move |_| {
+            clear_list_selection(&list_view);
             run();
-            return;
         });
     }
 
@@ -1123,6 +1166,8 @@ fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
             });
         });
     });
+
+    wire_type_to_search(&tab, &search_entry);
 
     return tab;
 }
@@ -1262,9 +1307,11 @@ fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
 
     {
         let filter = filter.clone();
+        let list_view = list_view.clone();
         search_entry.connect_search_changed(move |_| {
+            let previous = selected_package_name(&list_view);
             filter.changed(gtk4::FilterChange::Different);
-            return;
+            hide_info_if_package_gone(&list_view, previous);
         });
     }
 
@@ -1291,9 +1338,13 @@ fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
         });
     });
 
+    MANAGE_REFRESH.with(|cell| *cell.borrow_mut() = Some(populate.clone()));
+
     {
         let populate = populate.clone();
+        let list_view = list_view.clone();
         tab.connect_map(move |_| {
+            list_view.grab_focus();
             populate();
         });
     }
@@ -1325,7 +1376,36 @@ fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
         );
     });
 
+    wire_type_to_search(&tab, &search_entry);
+
     return tab;
+}
+
+fn wire_type_to_search(tab: &GtkBox, search_entry: &SearchEntry) {
+    let controller = EventControllerKey::new();
+    controller.set_propagation_phase(PropagationPhase::Capture);
+    let entry = search_entry.clone();
+    controller.connect_key_pressed(move |_, keyval, _keycode, state| {
+        if state.contains(gtk4::gdk::ModifierType::CONTROL_MASK)
+            || state.contains(gtk4::gdk::ModifierType::ALT_MASK)
+        {
+            return glib::Propagation::Proceed;
+        }
+        if entry.state_flags().contains(gtk4::StateFlags::FOCUS_WITHIN) {
+            return glib::Propagation::Proceed;
+        }
+        let Some(character) = keyval.to_unicode() else {
+            return glib::Propagation::Proceed;
+        };
+        if character.is_control() || character == ' ' {
+            return glib::Propagation::Proceed;
+        }
+        entry.set_text(&character.to_string());
+        entry.grab_focus();
+        entry.set_position(-1);
+        return glib::Propagation::Stop;
+    });
+    tab.add_controller(controller);
 }
 
 fn wire_manage_action(
@@ -1365,7 +1445,7 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
         log_info!(
             "ignore toggle for {}: target={}",
             pkg,
-            if target_state { "blacklist" } else { "unblacklist" }
+            if target_state { "blacklisted" } else { "not blacklisted" }
         );
 
         let (title, message, accept_label) = if target_state {

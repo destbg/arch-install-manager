@@ -32,7 +32,12 @@ const CLI_SEARCH_SOURCES: SearchSources = SearchSources {
     flatpak: false,
 };
 
-pub fn install(targets: &[String], skip_review: bool, reinstall: bool) -> i32 {
+pub fn install(
+    targets: &[String],
+    skip_review: bool,
+    reinstall: bool,
+    offer_optional: bool,
+) -> i32 {
     if targets.is_empty() {
         eprintln!("daim: no packages specified");
         return 2;
@@ -45,6 +50,7 @@ pub fn install(targets: &[String], skip_review: bool, reinstall: bool) -> i32 {
 
     let _ = client::call(Op::SyncDb);
 
+    let fresh_targets = fresh_install_targets(targets);
     let (repo_targets, aur_targets) = partition_targets(targets);
 
     let mut plan = AurPlan::default();
@@ -102,6 +108,10 @@ pub fn install(targets: &[String], skip_review: bool, reinstall: bool) -> i32 {
 
     cleanup_make_deps(&deps_installed);
 
+    if offer_optional {
+        offer_optional_deps(&fresh_targets);
+    }
+
     return 0;
 }
 
@@ -141,7 +151,7 @@ pub fn search(term: &str, select: bool) -> i32 {
             }
         })
         .collect();
-    return install(&names, false, false);
+    return install(&names, false, false, true);
 }
 
 pub fn upgrade() -> i32 {
@@ -521,6 +531,142 @@ fn current_orphans() -> HashSet<String> {
         .collect();
 }
 
+fn fresh_install_targets(targets: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for target in targets {
+        let name = target.strip_prefix("aur/").unwrap_or(target).to_string();
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        if !is_installed(&name) {
+            out.push(name);
+        }
+    }
+    return out;
+}
+
+fn is_installed(name: &str) -> bool {
+    return Command::new("pacman")
+        .args(["-Qq", name])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+}
+
+fn offer_optional_deps(fresh_targets: &[String]) {
+    if fresh_targets.is_empty() {
+        return;
+    }
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return;
+    }
+
+    let mut options: Vec<(String, String)> = Vec::new();
+    let mut seen = HashSet::new();
+    for pkg in fresh_targets {
+        for (name, description) in optional_deps(pkg) {
+            if is_installed(&name) {
+                continue;
+            }
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            options.push((name, description));
+        }
+    }
+    if options.is_empty() {
+        return;
+    }
+
+    println!();
+    println!(
+        "{} Optional packages you can also install. They add extra features but are not required.",
+        paint(true, "1;34", "==>")
+    );
+    for (index, (name, description)) in options.iter().enumerate() {
+        let number = paint(true, "1;34", &(index + 1).to_string());
+        let painted_name = paint(true, "1;36", name);
+        if description.is_empty() {
+            println!("  {} {}", number, painted_name);
+        } else {
+            println!(
+                "  {} {} {}",
+                number,
+                painted_name,
+                paint(true, "37", &format!("- {}", description))
+            );
+        }
+    }
+    print!(
+        "{} Type numbers to install (for example 1 3) or press Enter to skip: ",
+        paint(true, "1;34", "==>")
+    );
+    let _ = std::io::stdout().flush();
+
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+        return;
+    }
+    let picks = parse_picks(&line, options.len());
+    if picks.is_empty() {
+        return;
+    }
+    let selected: Vec<String> = picks.iter().map(|&i| options[i].0.clone()).collect();
+    install(&selected, false, false, false);
+}
+
+fn optional_deps(name: &str) -> Vec<(String, String)> {
+    let Ok(output) = Command::new("pacman")
+        .env("LC_ALL", "C")
+        .args(["-Qi", name])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut result = Vec::new();
+    let mut in_field = false;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("Optional Deps") {
+            in_field = true;
+            if let Some((_, value)) = rest.split_once(':') {
+                push_optdep(value.trim(), &mut result);
+            }
+            continue;
+        }
+        if in_field {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                push_optdep(line.trim(), &mut result);
+            } else {
+                in_field = false;
+            }
+        }
+    }
+    return result;
+}
+
+fn push_optdep(entry: &str, out: &mut Vec<(String, String)>) {
+    if entry.is_empty() || entry == "None" {
+        return;
+    }
+    if entry.ends_with("[installed]") {
+        return;
+    }
+    let (name, description) = match entry.split_once(':') {
+        Some((n, d)) => (n.trim().to_string(), d.trim().to_string()),
+        None => (entry.trim().to_string(), String::new()),
+    };
+    if name.is_empty() {
+        return;
+    }
+    out.push((name, description));
+}
+
 fn aur_cache_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
     return PathBuf::from(home).join(".cache").join("daim").join("aur");
@@ -688,7 +834,7 @@ fn install_selected_updates(selected: &[&PackageUpdate]) -> i32 {
     }
 
     if !targets.is_empty() {
-        let code = install(&targets, false, false);
+        let code = install(&targets, false, false, false);
         if code != 0 {
             return code;
         }
@@ -820,7 +966,7 @@ fn check_repo_switches() {
         return;
     }
     let targets: Vec<String> = switches.iter().map(|s| s.target_name.clone()).collect();
-    install(&targets, false, true);
+    install(&targets, false, true, false);
 }
 
 fn check_cache() {
