@@ -8,7 +8,6 @@ pub mod error_page;
 pub mod history_dialog;
 pub mod info_panel;
 pub mod install_review;
-pub mod loading;
 pub mod main_window;
 pub mod news_dialog;
 pub mod no_updates;

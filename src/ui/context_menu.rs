@@ -224,14 +224,10 @@ pub fn reload_package_list(window: &ApplicationWindow) {
     let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
         return;
     };
-    let Some(stack) = main_box.first_child().and_downcast::<gtk4::Stack>() else {
+    let Some(content_box) = main_box.first_child().and_downcast::<GtkBox>() else {
         return;
     };
-    let Some(content_box) = stack.child_by_name("content").and_downcast::<GtkBox>() else {
-        return;
-    };
-    stack.set_visible_child_name("loading");
-    load_packages(stack, content_box, window.clone());
+    load_packages(content_box, window.clone());
 }
 
 fn add_action<F>(parent: &GtkBox, popover: &Popover, label: &str, action: F)

@@ -27,7 +27,6 @@ use crate::ui::error_page::{create_error_page, update_error_page_message};
 use crate::ui::history_dialog::show_history_dialog;
 use crate::ui::info_panel::{create_info_panel, update_ignore_button_tooltip};
 use crate::ui::install_review::review_then_install;
-use crate::ui::loading::create_loading_page;
 use crate::ui::news_dialog::show_news_dialog;
 use crate::ui::no_updates::create_no_updates_page;
 use crate::ui::package_list::{create_package_list, format_age, prefers_dark, update_statusbar};
@@ -124,20 +123,8 @@ pub fn build_ui(app: &Application) {
 
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
-    let stack = Stack::new();
-    stack.set_vexpand(true);
-
-    let loading_box = create_loading_page();
-    stack.add_named(&loading_box, Some("loading"));
-
-    let no_updates_box = create_no_updates_page();
-    stack.add_named(&no_updates_box, Some("no-updates"));
-
-    let error_box = create_error_page();
-    stack.add_named(&error_box, Some("error"));
-
-    let content_box = create_main_content(decorations_disabled, &stack, &window);
-    stack.add_named(&content_box, Some("content"));
+    let content_box = create_main_content(decorations_disabled, &window);
+    content_box.set_vexpand(true);
 
     if let Some(view_stack) = content_box.first_child().and_downcast::<Stack>() {
         install_tabs_css();
@@ -147,28 +134,23 @@ pub fn build_ui(app: &Application) {
         header_bar.pack_start(&switcher);
     }
 
-    main_box.append(&stack);
+    main_box.append(&content_box);
 
     window.set_child(Some(&main_box));
 
-    stack.set_visible_child_name("content");
-
     window.present();
 
-    let stack_clone = stack.clone();
     let content_box_clone = content_box.clone();
     let window_clone2 = window.clone();
     glib::idle_add_local_once(move || {
-        start_initial_load(stack_clone, content_box_clone, window_clone2);
+        start_initial_load(content_box_clone, window_clone2);
     });
 }
 
 pub fn update_layout(content_box: &GtkBox) -> Option<GtkBox> {
-    let view_stack = content_box.first_child().and_downcast::<Stack>()?;
-    let outer = view_stack
-        .child_by_name("update")
-        .and_downcast::<GtkBox>()?;
-    let overlay = outer.first_child().and_downcast::<gtk4::Overlay>()?;
+    let overlay = update_view_stack(content_box)?
+        .child_by_name("list")
+        .and_downcast::<gtk4::Overlay>()?;
     return overlay.child().and_downcast::<GtkBox>();
 }
 
@@ -178,8 +160,7 @@ pub fn find_favorites_column(window: &ApplicationWindow) -> Option<ColumnViewCol
 
 pub fn find_package_store(window: &ApplicationWindow) -> Option<ListStore> {
     let main_box = window.child().and_downcast::<GtkBox>()?;
-    let stack = main_box.first_child().and_downcast::<Stack>()?;
-    let content_box = stack.child_by_name("content").and_downcast::<GtkBox>()?;
+    let content_box = main_box.first_child().and_downcast::<GtkBox>()?;
     let update = update_layout(&content_box)?;
     let paned = update
         .last_child()
@@ -189,8 +170,10 @@ pub fn find_package_store(window: &ApplicationWindow) -> Option<ListStore> {
     return extract_list_store(&column_view);
 }
 
-pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindow) {
-    stack.set_visible_child_name("content");
+pub fn load_packages(content_box: GtkBox, window: ApplicationWindow) {
+    if let Some(update_stack) = update_view_stack(&content_box) {
+        update_stack.set_visible_child_name("list");
+    }
     show_update_loading(true);
     glib::spawn_future_local(async move {
         let packages_result = gio::spawn_blocking(|| get_package_updates()).await;
@@ -220,7 +203,9 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                 }
 
                 if packages.is_empty() {
-                    stack.set_visible_child_name("no-updates");
+                    if let Some(update_stack) = update_view_stack(&content_box) {
+                        update_stack.set_visible_child_name("empty");
+                    }
                     return;
                 }
 
@@ -278,14 +263,20 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                     update_statusbar(&statusbar, &list_store, "updates");
                 }
 
-                stack.set_visible_child_name("content");
+                if let Some(update_stack) = update_view_stack(&content_box) {
+                    update_stack.set_visible_child_name("list");
+                }
             }
             Ok(Err(e)) => {
                 if let UpdateError::SyncFailed(ref msg) = e {
-                    if let Some(error_box) = stack.child_by_name("error").and_downcast::<GtkBox>() {
-                        update_error_page_message(&error_box, msg);
+                    if let Some(update_stack) = update_view_stack(&content_box) {
+                        if let Some(error_box) =
+                            update_stack.child_by_name("error").and_downcast::<GtkBox>()
+                        {
+                            update_error_page_message(&error_box, msg);
+                        }
+                        update_stack.set_visible_child_name("error");
                     }
-                    stack.set_visible_child_name("error");
                 } else {
                     show_error_dialog(
                         window.upcast_ref::<gtk4::Window>(),
@@ -293,12 +284,10 @@ pub fn load_packages(stack: Stack, content_box: GtkBox, window: ApplicationWindo
                         &format!("Failed to load package updates: {}", e),
                     );
                     eprintln!("Error loading packages: {}", e);
-                    stack.set_visible_child_name("content");
                 }
             }
             Err(e) => {
                 eprintln!("Error in background thread: {:?}", e);
-                stack.set_visible_child_name("content");
             }
         }
     });
@@ -314,11 +303,19 @@ pub(crate) fn paned_column_view(paned: &Paned) -> Option<ColumnView> {
     return scrolled.child().and_downcast::<ColumnView>();
 }
 
-fn start_initial_load(stack: Stack, content_box: GtkBox, window: ApplicationWindow) {
+fn update_view_stack(content_box: &GtkBox) -> Option<Stack> {
+    let view_stack = content_box.first_child().and_downcast::<Stack>()?;
+    let outer = view_stack
+        .child_by_name("update")
+        .and_downcast::<GtkBox>()?;
+    return outer.first_child().and_downcast::<Stack>();
+}
+
+fn start_initial_load(content_box: GtkBox, window: ApplicationWindow) {
     let check_news = load_settings().check_arch_news;
 
     trigger_check_service();
-    load_packages(stack, content_box, window.clone());
+    load_packages(content_box, window.clone());
 
     if !check_news {
         return;
@@ -474,11 +471,7 @@ fn install_tabs_css() {
     });
 }
 
-fn build_update_tab(
-    decorations_disabled: bool,
-    stack: &Stack,
-    window: &ApplicationWindow,
-) -> GtkBox {
+fn build_update_tab(decorations_disabled: bool, window: &ApplicationWindow) -> GtkBox {
     let content = GtkBox::new(Orientation::Vertical, 0);
 
     let toolbar_container = create_toolbar(decorations_disabled);
@@ -526,7 +519,7 @@ fn build_update_tab(
     content.append(&search_bar);
 
     let (paned, _scrim, _scrim_spinner) =
-        build_list_with_info_panel(&list_view, stack, window, "Loading package updates...");
+        build_list_with_info_panel(&list_view, window, "Loading package updates...");
     content.append(&paned);
 
     update_statusbar(&statusbar, &store, "updates");
@@ -539,8 +532,15 @@ fn build_update_tab(
     show_loading(&loading, &spinner);
     UPDATE_LOADING.with(|cell| *cell.borrow_mut() = Some((loading, spinner)));
 
+    let update_stack = Stack::new();
+    update_stack.set_vexpand(true);
+    update_stack.add_named(&overlay, Some("list"));
+    update_stack.add_named(&create_no_updates_page(), Some("empty"));
+    update_stack.add_named(&create_error_page(), Some("error"));
+    update_stack.set_visible_child_name("list");
+
     let outer = GtkBox::new(Orientation::Vertical, 0);
-    outer.append(&overlay);
+    outer.append(&update_stack);
 
     return outer;
 }
@@ -604,7 +604,6 @@ fn wire_empty_state(list_view: &ColumnView, empty: &GtkBox) {
 
 fn build_list_with_info_panel(
     list_view: &ColumnView,
-    stack: &Stack,
     window: &ApplicationWindow,
     loading_text: &str,
 ) -> (Paned, GtkBox, gtk4::Spinner) {
@@ -653,7 +652,7 @@ fn build_list_with_info_panel(
     paned.set_end_child(Some(&info_panel.container));
     paned.set_position(380);
 
-    wire_ignore_button(&info_panel, stack, window);
+    wire_ignore_button(&info_panel, window);
     attach_info_panel(list_view, &info_panel);
 
     return (paned, loading, spinner);
@@ -874,26 +873,18 @@ fn hide_info_if_package_gone(list_view: &ColumnView, previous: Option<String>) {
     }
 }
 
-fn create_main_content(
-    decorations_disabled: bool,
-    stack: &Stack,
-    window: &ApplicationWindow,
-) -> GtkBox {
+fn create_main_content(decorations_disabled: bool, window: &ApplicationWindow) -> GtkBox {
     let content_box = GtkBox::new(Orientation::Vertical, 0);
 
     let view_stack = Stack::new();
     view_stack.set_vexpand(true);
+    view_stack.add_titled(&build_install_tab(window), Some("install"), "Install");
     view_stack.add_titled(
-        &build_install_tab(stack, window),
-        Some("install"),
-        "Install",
-    );
-    view_stack.add_titled(
-        &build_update_tab(decorations_disabled, stack, window),
+        &build_update_tab(decorations_disabled, window),
         Some("update"),
         "Update",
     );
-    view_stack.add_titled(&build_manage_tab(stack, window), Some("manage"), "Manage");
+    view_stack.add_titled(&build_manage_tab(window), Some("manage"), "Manage");
     view_stack.set_visible_child_name("update");
 
     content_box.append(&view_stack);
@@ -964,7 +955,7 @@ fn bottom_bar(statusbar: &gtk4::Label) -> GtkBox {
     return row;
 }
 
-fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
+fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     let settings = load_settings();
 
     let tab = GtkBox::new(Orientation::Vertical, 0);
@@ -1023,8 +1014,7 @@ fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
     });
     disable_column_sorting(&list_view);
 
-    let (paned, loading, spinner) =
-        build_list_with_info_panel(&list_view, stack, window, "Searching...");
+    let (paned, loading, spinner) = build_list_with_info_panel(&list_view, window, "Searching...");
     tab.append(&paned);
 
     tab.append(&bottom_bar(&statusbar));
@@ -1269,7 +1259,7 @@ fn flatpak_source_icon() -> &'static str {
     );
 }
 
-fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
+fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
     let tab = GtkBox::new(Orientation::Vertical, 0);
 
     let search_entry = SearchEntry::new();
@@ -1302,7 +1292,7 @@ fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
     set_list_column_titles(&list_view, "Select", "Size");
 
     let (paned, loading, spinner) =
-        build_list_with_info_panel(&list_view, stack, window, "Loading packages...");
+        build_list_with_info_panel(&list_view, window, "Loading packages...");
     tab.append(&paned);
 
     {
@@ -1430,8 +1420,7 @@ fn wire_manage_action(
     });
 }
 
-fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWindow) {
-    let stack = stack.clone();
+fn wire_ignore_button(panel: &InfoPanel, window: &ApplicationWindow) {
     let window = window.clone();
     let current_package = panel.current_package.clone();
     let handler_id_cell = panel.ignore_handler_id.clone();
@@ -1468,7 +1457,6 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
             )
         };
 
-        let stack_d = stack.clone();
         let window_d = window.clone();
         let pkg_d = pkg.clone();
         let btn_d = btn.clone();
@@ -1490,10 +1478,12 @@ fn wire_ignore_button(panel: &InfoPanel, stack: &Stack, window: &ApplicationWind
                 Ok(ref resp) if resp.is_success() => {
                     update_ignore_button_tooltip(&btn_d);
                     trigger_check_service();
-                    if let Some(content_box) =
-                        stack_d.child_by_name("content").and_downcast::<GtkBox>()
+                    if let Some(content_box) = window_d
+                        .child()
+                        .and_downcast::<GtkBox>()
+                        .and_then(|main_box| main_box.first_child().and_downcast::<GtkBox>())
                     {
-                        load_packages(stack_d.clone(), content_box, window_d.clone());
+                        load_packages(content_box, window_d.clone());
                     }
                 }
                 other => {
@@ -1554,8 +1544,7 @@ fn info_title_markup(package: &PackageUpdate) -> String {
 
 fn find_column(window: &ApplicationWindow, index: u32) -> Option<ColumnViewColumn> {
     let main_box = window.child().and_downcast::<GtkBox>()?;
-    let stack = main_box.first_child().and_downcast::<Stack>()?;
-    let content_box = stack.child_by_name("content").and_downcast::<GtkBox>()?;
+    let content_box = main_box.first_child().and_downcast::<GtkBox>()?;
     let update = update_layout(&content_box)?;
     let paned = update
         .last_child()

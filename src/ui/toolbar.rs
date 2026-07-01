@@ -88,12 +88,11 @@ pub fn create_toolbar(show_settings_button: bool) -> GtkBox {
         toolbar,
         move |_| {
             log_info!("toolbar: Refresh clicked");
-            let Some((stack, content_box, window)) = get_navigation_stack(&toolbar) else {
+            let Some((content_box, window)) = get_navigation_stack(&toolbar) else {
                 return;
             };
 
-            stack.set_visible_child_name("loading");
-            load_packages(stack, content_box, window);
+            load_packages(content_box, window);
         }
     ));
 
@@ -282,7 +281,7 @@ pub fn create_toolbar(show_settings_button: bool) -> GtkBox {
 }
 
 fn find_store_and_statusbar(toolbar: &GtkBox) -> Option<(ListStore, Label)> {
-    let Some((_, content_box, _)) = get_navigation_stack(toolbar) else {
+    let Some((content_box, _)) = get_navigation_stack(toolbar) else {
         return None;
     };
     let Some(content_box) = update_layout(&content_box) else {

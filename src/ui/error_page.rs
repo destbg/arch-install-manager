@@ -136,12 +136,11 @@ pub fn update_error_page_message(error_box: &GtkBox, error_message: &str) {
 }
 
 fn handle_retry_click(error_box: &GtkBox) {
-    let Some((stack, content_box, window)) = get_navigation_stack(error_box) else {
+    let Some((content_box, window)) = get_navigation_stack(error_box) else {
         return;
     };
 
-    stack.set_visible_child_name("loading");
-    load_packages(stack, content_box, window);
+    load_packages(content_box, window);
 }
 
 fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: &Button) {
@@ -150,9 +149,8 @@ fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: 
         Ok(ref resp) if resp.is_success() => {
             remove_lock_btn.set_visible(false);
 
-            if let Some((stack, content_box, window)) = get_navigation_stack(error_box) {
-                stack.set_visible_child_name("loading");
-                load_packages(stack, content_box, window);
+            if let Some((content_box, window)) = get_navigation_stack(error_box) {
+                load_packages(content_box, window);
             }
         }
         other => {
@@ -162,7 +160,7 @@ fn handle_remove_lock(error_box: &GtkBox, remove_lock_btn: &Button, _retry_btn: 
                 Ok(_) => "the helper reported a failure".to_string(),
                 Err(e) => e.to_string(),
             };
-            if let Some((_, _, window)) = get_navigation_stack(error_box) {
+            if let Some((_, window)) = get_navigation_stack(error_box) {
                 show_error_dialog(
                     window.upcast_ref::<gtk4::Window>(),
                     "Failed to Remove Lock",

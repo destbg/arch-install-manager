@@ -41,10 +41,9 @@ pub fn create_no_updates_page() -> GtkBox {
 }
 
 fn handle_refresh_click(no_updates_box: &GtkBox) {
-    let Some((stack, content_box, window)) = get_navigation_stack(no_updates_box) else {
+    let Some((content_box, window)) = get_navigation_stack(no_updates_box) else {
         return;
     };
 
-    stack.set_visible_child_name("loading");
-    load_packages(stack, content_box, window);
+    load_packages(content_box, window);
 }

@@ -649,6 +649,7 @@ fn main() {
                     && prev_relevant_total == 0
                     && new_relevant_total > 0
                     && settings.show_update_notifications
+                    && !is_main_app_running()
                 {
                     fire_notification(new_relevant_total);
                 }

@@ -176,10 +176,9 @@ fn capture_terminal_output(terminal: &vte4::Terminal, label: &str) {
 }
 
 fn refresh_package_list(main_box: &GtkBox) {
-    let Some((stack, content_box, window)) = get_navigation_stack(main_box) else {
+    let Some((content_box, window)) = get_navigation_stack(main_box) else {
         return;
     };
 
-    stack.set_visible_child_name("loading");
-    load_packages(stack, content_box, window);
+    load_packages(content_box, window);
 }
