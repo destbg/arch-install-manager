@@ -1,12 +1,15 @@
 use crate::{
     helpers::aur::url_encode, helpers::elevated::get_original_user, helpers::network::http_get,
-    models::pkgbuild_review::PkgbuildReview,
+    models::pkgbuild_review::PkgbuildReview, models::review_file::ReviewFile,
 };
 use anyhow::{Context, Result};
+use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const PKGBUILD_FETCH_TIMEOUT_SECS: u32 = 10;
+const MAX_REVIEW_FILE_BYTES: usize = 1_000_000;
 
 pub fn prepare_pkgbuild_review(package: &str) -> Result<PkgbuildReview> {
     if let Some(dir) = find_clone_dir(package) {
@@ -15,9 +18,19 @@ pub fn prepare_pkgbuild_review(package: &str) -> Result<PkgbuildReview> {
                 package: package.to_string(),
                 diff: Some(diff),
                 needs_review,
-                pkgbuild: None,
+                files: read_repo_files(&dir),
             });
         }
+    }
+
+    let files = files_from_fresh_clone(package);
+    if !files.is_empty() {
+        return Ok(PkgbuildReview {
+            package: package.to_string(),
+            diff: None,
+            needs_review: false,
+            files,
+        });
     }
 
     let pkgbuild = fetch_remote_pkgbuild(package)?;
@@ -25,7 +38,10 @@ pub fn prepare_pkgbuild_review(package: &str) -> Result<PkgbuildReview> {
         package: package.to_string(),
         diff: None,
         needs_review: false,
-        pkgbuild: Some(pkgbuild),
+        files: vec![ReviewFile {
+            name: "PKGBUILD".to_string(),
+            content: pkgbuild,
+        }],
     });
 }
 
@@ -150,6 +166,129 @@ fn diff_adds_or_removes_lines(diff: &str) -> bool {
     }
 
     return needs;
+}
+
+fn read_repo_files(dir: &Path) -> Vec<ReviewFile> {
+    let mut files = Vec::new();
+    collect_files(dir, dir, &mut files);
+    files.sort_by(|a, b| {
+        review_rank(&a.name)
+            .cmp(&review_rank(&b.name))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    return files;
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<ReviewFile>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if is_skipped_entry(&file_name) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_files(root, &path, out);
+            continue;
+        }
+        let Some(rel) = path.strip_prefix(root).ok().and_then(|p| p.to_str()) else {
+            continue;
+        };
+        let content = if file_type.is_symlink() {
+            "(symlink, not shown)".to_string()
+        } else {
+            match read_text_file(&path) {
+                Some(text) => text,
+                None => continue,
+            }
+        };
+        out.push(ReviewFile {
+            name: rel.to_string(),
+            content,
+        });
+    }
+}
+
+fn is_skipped_entry(name: &str) -> bool {
+    return name == ".git"
+        || name == ".SRCINFO"
+        || name == ".gitignore"
+        || name == ".gitattributes";
+}
+
+fn read_text_file(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() > MAX_REVIEW_FILE_BYTES {
+        return Some(format!(
+            "(file is {} bytes, too large to display here)",
+            bytes.len()
+        ));
+    }
+    if bytes.contains(&0) {
+        return Some(format!("(binary file, {} bytes, not shown)", bytes.len()));
+    }
+    return Some(match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => "(file is not valid text, not shown)".to_string(),
+    });
+}
+
+fn review_rank(name: &str) -> u8 {
+    if name == "PKGBUILD" {
+        return 0;
+    }
+    if name.ends_with(".install") {
+        return 1;
+    }
+    return 2;
+}
+
+fn files_from_fresh_clone(package: &str) -> Vec<ReviewFile> {
+    let Some(dir) = clone_to_temp(package) else {
+        return Vec::new();
+    };
+    let files = read_repo_files(&dir);
+    let _ = fs::remove_dir_all(&dir);
+    return files;
+}
+
+fn clone_to_temp(package: &str) -> Option<PathBuf> {
+    if !is_valid_aur_name(package) {
+        return None;
+    }
+    let dir = env::temp_dir().join(format!("daim-review-{}-{}", std::process::id(), package));
+    let _ = fs::remove_dir_all(&dir);
+
+    let url = format!("https://aur.archlinux.org/{}.git", package);
+    let status = Command::new("git")
+        .args(["clone", "--depth", "1"])
+        .arg(&url)
+        .arg(&dir)
+        .status()
+        .ok()?;
+    if status.success() && dir.join("PKGBUILD").exists() {
+        return Some(dir);
+    }
+    let _ = fs::remove_dir_all(&dir);
+    return None;
+}
+
+fn is_valid_aur_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 256 {
+        return false;
+    }
+    if name.starts_with('-') || name.starts_with('.') {
+        return false;
+    }
+    return name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '+' | '-'));
 }
 
 fn fetch_remote_pkgbuild(package: &str) -> Result<String> {

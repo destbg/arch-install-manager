@@ -11,6 +11,7 @@ use crate::helpers::aur_pkgbuild::prepare_pkgbuild_review;
 use crate::helpers::settings::load_settings;
 use crate::log_info;
 use crate::models::pkgbuild_review::PkgbuildReview;
+use crate::models::review_file::ReviewFile;
 use crate::ui::dialogs::create_progress_dialog;
 use crate::ui::pkgbuild_review_dialog::build_review_view;
 
@@ -43,7 +44,10 @@ pub fn review_then_install(
                     package: name,
                     diff: None,
                     needs_review: true,
-                    pkgbuild: Some("Could not load the PKGBUILD for review.".to_string()),
+                    files: vec![ReviewFile {
+                        name: "PKGBUILD".to_string(),
+                        content: "Could not load the package files for review.".to_string(),
+                    }],
                 }),
             }
         }

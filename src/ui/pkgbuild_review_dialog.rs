@@ -12,9 +12,7 @@ use crate::models::diff_row::DiffRow;
 use crate::models::pkgbuild_review::PkgbuildReview;
 use crate::ui::dialogs::build_dialog_window;
 use crate::ui::package_list::prefers_dark;
-use crate::ui::pacnew_diff::{
-    build_buffer, build_source_view, diff_highlight_colors, wrap_in_scroll,
-};
+use crate::ui::pacnew_diff::{build_buffer, build_source_view, diff_highlight_colors};
 
 pub fn show_pkgbuild_review_dialog(parent: &Window, package: &str) {
     log_info!("pkgbuild review opened for {}", package);
@@ -63,15 +61,58 @@ pub(crate) fn build_review_view(review: &PkgbuildReview) -> GtkBox {
         return container;
     }
 
-    if let Some(pkgbuild) = &review.pkgbuild {
-        let buffer = build_buffer(pkgbuild, shell_language().as_ref());
-        container.append(&wrap_in_scroll(
-            &build_source_view(&buffer, false),
-            "AUR (latest)",
-        ));
+    if review.files.is_empty() {
+        container.append(&header_label("No package files were found to review."));
+        return container;
     }
 
+    container.append(&header_label(
+        "Review every file that will be built. Anything unexpected here runs on your machine.",
+    ));
+
+    let list = GtkBox::new(Orientation::Vertical, 12);
+    list.set_margin_start(12);
+    list.set_margin_end(12);
+    list.set_margin_top(8);
+    list.set_margin_bottom(12);
+    for file in &review.files {
+        list.append(&build_file_content_card(&file.name, &file.content));
+    }
+
+    container.append(
+        &ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .vexpand(true)
+            .hexpand(true)
+            .child(&list)
+            .build(),
+    );
     return container;
+}
+
+fn build_file_content_card(name: &str, content: &str) -> Frame {
+    let header = Label::new(None);
+    header.set_xalign(0.0);
+    header.set_margin_start(4);
+    header.set_margin_end(4);
+    header.set_markup(&format!("<b>{}</b>", glib::markup_escape_text(name)));
+
+    let buffer = build_buffer(content, language_for_file(name).as_ref());
+    let view = build_source_view(&buffer, false);
+
+    let scrolled = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Automatic)
+        .vscrollbar_policy(PolicyType::Never)
+        .propagate_natural_height(true)
+        .child(&view)
+        .build();
+
+    let frame = Frame::new(None);
+    frame.set_label_widget(Some(&header));
+    frame.set_label_align(0.0);
+    frame.set_child(Some(&scrolled));
+    return frame;
 }
 
 fn parse_diff(diff: &str) -> Vec<DiffRow> {
@@ -369,8 +410,4 @@ fn build_message_view(message: &str) -> GtkBox {
     wrapper.append(&label);
 
     return wrapper;
-}
-
-fn shell_language() -> Option<sourceview5::Language> {
-    return LanguageManager::default().language("sh");
 }
