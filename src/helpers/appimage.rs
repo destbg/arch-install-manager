@@ -1,9 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::helpers::appimage_config::{load_appimage_entries, source_for_path};
+use crate::helpers::appimage_config::{
+    load_appimage_entries, remove_appimage_entry, source_for_path,
+};
 use crate::helpers::elevated::get_original_user;
 use crate::helpers::network::http_get;
 use crate::models::appimage_update_source::AppImageUpdateSource;
@@ -76,6 +78,16 @@ pub fn managed_appimages() -> Vec<DiscoveredAppImage> {
     }
     result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     return result;
+}
+
+pub fn delete_appimage(path: &str) -> Result<()> {
+    let file = Path::new(path);
+    if file.exists() {
+        std::fs::remove_file(file).with_context(|| format!("Failed to delete {}", path))?;
+    }
+    remove_desktop_entries_for(path);
+    let _ = remove_appimage_entry(path);
+    return Ok(());
 }
 
 pub fn resolve_source(path: &str, name: &str) -> AppImageUpdateSource {
@@ -154,6 +166,28 @@ pub fn build_appimage_update_commands(packages: &[&PackageUpdate]) -> Vec<String
         }
     }
     return commands;
+}
+
+fn remove_desktop_entries_for(appimage_path: &str) {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    let apps_dir = PathBuf::from(home).join(".local/share/applications");
+    let Ok(entries) = std::fs::read_dir(&apps_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let desktop = entry.path();
+        if desktop.extension().and_then(|e| e.to_str()) != Some("desktop") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&desktop) else {
+            continue;
+        };
+        if content.contains(appimage_path) {
+            let _ = std::fs::remove_file(&desktop);
+        }
+    }
 }
 
 fn resolve_download_url_for(path: &str, name: &str) -> Option<String> {

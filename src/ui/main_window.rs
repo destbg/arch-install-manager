@@ -170,6 +170,53 @@ pub fn find_package_store(window: &ApplicationWindow) -> Option<ListStore> {
     return extract_list_store(&column_view);
 }
 
+pub fn remove_from_update_list(window: &ApplicationWindow, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
+        return;
+    };
+    let Some(content_box) = main_box.first_child().and_downcast::<GtkBox>() else {
+        return;
+    };
+    let Some(update) = update_layout(&content_box) else {
+        return;
+    };
+    let Some(paned) = update
+        .last_child()
+        .and_then(|c| c.prev_sibling())
+        .and_downcast::<Paned>()
+    else {
+        return;
+    };
+    let Some(column_view) = paned_column_view(&paned) else {
+        return;
+    };
+    let Some(store) = extract_list_store(&column_view) else {
+        return;
+    };
+
+    let mut index = store.n_items();
+    let mut removed = false;
+    while index > 0 {
+        index -= 1;
+        let Some(obj) = store.item(index).and_downcast::<PackageUpdateObject>() else {
+            continue;
+        };
+        if names.iter().any(|name| name == &obj.data().name) {
+            store.remove(index);
+            removed = true;
+        }
+    }
+
+    if removed {
+        if let Some(statusbar) = update.last_child().and_downcast::<gtk4::Label>() {
+            update_statusbar(&statusbar, &store, "updates");
+        }
+    }
+}
+
 pub fn load_packages(content_box: GtkBox, window: ApplicationWindow) {
     if let Some(update_stack) = update_view_stack(&content_box) {
         update_stack.set_visible_child_name("list");
@@ -1397,7 +1444,11 @@ fn wire_manage_action(
         let _ = attach_session();
         let command = build_command(&names);
         let populate = populate.clone();
-        run_command_in_dialog(&window, &command, true, move || populate());
+        let window_finish = window.clone();
+        run_command_in_dialog(&window, &command, true, move || {
+            populate();
+            remove_from_update_list(&window_finish, &names);
+        });
     });
 }
 

@@ -21,7 +21,7 @@ use crate::ui::aur_scan_dialog::show_aur_scan_dialog;
 use crate::ui::dialogs::show_error_dialog;
 use crate::ui::downgrade_dialog::show_downgrade_dialog;
 use crate::ui::install_review::review_then_install;
-use crate::ui::main_window::{load_packages, refresh_manage_list};
+use crate::ui::main_window::{load_packages, refresh_manage_list, remove_from_update_list};
 use crate::ui::package_files_dialog::show_package_files_dialog;
 use crate::ui::package_list::refresh_favorite_button;
 use crate::ui::pkgbuild_review_dialog::show_pkgbuild_review_dialog;
@@ -97,7 +97,12 @@ pub fn show_package_context_menu(
                     return;
                 };
                 let command = format!("daim remove {}", quoted);
-                run_command_in_dialog(&window, &command, true, || refresh_manage_list());
+                let window_finish = window.clone();
+                let name_finish = name.clone();
+                run_command_in_dialog(&window, &command, true, move || {
+                    refresh_manage_list();
+                    remove_from_update_list(&window_finish, std::slice::from_ref(&name_finish));
+                });
             }
         });
         add_separator(&vbox);
