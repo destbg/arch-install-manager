@@ -962,7 +962,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
 
     let search_entry = SearchEntry::new();
     search_entry.set_placeholder_text(Some(
-        "Search the repositories and the AUR, then press Enter",
+        "Search the official repositories, then press Enter",
     ));
     search_entry.set_hexpand(true);
 
@@ -971,12 +971,6 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         "Show packages from the official repositories",
         settings.install_search_official,
         true,
-    );
-    let aur_toggle = source_filter_toggle(
-        "system-users-symbolic",
-        "Show packages from the AUR",
-        settings.enable_aur_support && settings.install_search_aur,
-        settings.enable_aur_support,
     );
     let flatpak_toggle = source_filter_toggle(
         flatpak_source_icon(),
@@ -997,7 +991,6 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     search_row.set_margin_bottom(8);
     search_row.append(&search_entry);
     search_row.append(&official_toggle);
-    search_row.append(&aur_toggle);
     search_row.append(&flatpak_toggle);
     search_row.append(&actions_separator);
     search_row.append(&install_btn);
@@ -1027,7 +1020,6 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         let spinner = spinner.clone();
         let list_view = list_view.clone();
         let official_toggle = official_toggle.clone();
-        let aur_toggle = aur_toggle.clone();
         let flatpak_toggle = flatpak_toggle.clone();
         std::rc::Rc::new(move || {
             let query = entry.text().to_string();
@@ -1038,7 +1030,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
             let list_view = list_view.clone();
             let sources = SearchSources {
                 official: official_toggle.is_active(),
-                aur: aur_toggle.is_active(),
+                aur: false,
                 flatpak: flatpak_toggle.is_active(),
             };
             show_loading(&loading, &spinner);
@@ -1101,17 +1093,6 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         official_toggle.connect_toggled(move |toggle| {
             let mut settings = load_settings();
             settings.install_search_official = toggle.is_active();
-            let _ = save_settings(&settings);
-            run();
-            return;
-        });
-    }
-
-    {
-        let run = run_search.clone();
-        aur_toggle.connect_toggled(move |toggle| {
-            let mut settings = load_settings();
-            settings.install_search_aur = toggle.is_active();
             let _ = save_settings(&settings);
             run();
             return;
