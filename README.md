@@ -17,8 +17,6 @@ Arch Install Manager (daim) is an app for Arch Linux that helps you install, upd
 - Move an app from the AUR to an official repository once it is available there.
 - See a few helpful follow up steps after an update, such as services that need a restart.
 
-The app asks for your password only when it needs it. It only asks once. When it builds an app from the AUR, it first shows you the build recipe so you can look it over. Those builds always run as you, never with admin rights.
-
 ## Install
 
 Build and install it from source.
