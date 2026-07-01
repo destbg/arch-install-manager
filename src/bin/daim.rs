@@ -2,9 +2,12 @@ use std::process::exit;
 
 use arch_install_manager::engine;
 use arch_install_manager::ipc::client;
-use arch_install_manager::ipc::protocol::{MirrorTool, Op, Response};
+use arch_install_manager::models::mirror_tool::MirrorTool;
+use arch_install_manager::models::op::Op;
+use arch_install_manager::models::response::Response;
 
 fn main() {
+    set_non_dumpable();
     if unsafe { libc::geteuid() } == 0 {
         eprintln!(
             "daim: refusing to run as root. Run it as your normal user. daim asks for admin\n      \
@@ -78,7 +81,6 @@ fn main() {
             }
             exit(exit_code);
         }
-        Ok(Response::Pong) => exit(0),
         Ok(Response::Error { message }) => {
             eprintln!("daim: {message}");
             exit(1);
@@ -87,6 +89,12 @@ fn main() {
             eprintln!("daim: {e}");
             exit(1);
         }
+    }
+}
+
+fn set_non_dumpable() {
+    unsafe {
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
     }
 }
 

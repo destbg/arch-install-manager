@@ -1,159 +1,97 @@
-use std::io::{self, Read};
+use std::io;
 use std::os::fd::OwnedFd;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 use nix::sys::socket::getsockopt;
 use nix::sys::socket::sockopt::PeerCredentials;
-use nix::unistd::{Gid, Uid, User, chown, setgid, setgroups, setuid};
+use nix::unistd::{Gid, Uid, User, setgid, setgroups, setuid};
 
 use crate::helpers::database_lock::remove_database_lock;
 use crate::helpers::pacman_ignore::{add_to_ignore_pkg, remove_from_ignore_pkg};
-use crate::ipc::protocol::{MirrorTool, Op, Request, Response, recv_request, write_response};
+use crate::ipc::protocol::{recv_request, write_response};
+use crate::models::mirror_tool::MirrorTool;
+use crate::models::op::Op;
+use crate::models::request::Request;
+use crate::models::response::Response;
 
-const IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
 const BUILD_USER: &str = "daim-build";
 const AUR_CLONE_SUBDIR: &str = ".cache/daim/aur";
 const BUILD_ROOT: &str = "/var/lib/daim/build";
 const BUILD_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+const CONNECT_ATTEMPTS: u32 = 30;
 
 pub struct Config {
-    pub uid: u32,
-    pub gid: u32,
-    pub socket_path: PathBuf,
+    pub connect_path: PathBuf,
 }
 
-static LAST_ACTIVITY: Mutex<Option<Instant>> = Mutex::new(None);
-
-static ACTIVE_OPS: AtomicUsize = AtomicUsize::new(0);
-
 pub fn run(config: Config) -> io::Result<()> {
-    if let Some(dir) = config.socket_path.parent() {
-        std::fs::create_dir_all(dir)?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-        let _ = chown(
-            dir,
-            Some(Uid::from_raw(config.uid)),
-            Some(Gid::from_raw(config.gid)),
-        );
-    }
-    let _ = std::fs::remove_file(&config.socket_path);
+    set_non_dumpable();
 
-    let listener = UnixListener::bind(&config.socket_path)?;
-    std::fs::set_permissions(&config.socket_path, std::fs::Permissions::from_mode(0o600))?;
-    let _ = chown(
-        &config.socket_path,
-        Some(Uid::from_raw(config.uid)),
-        Some(Gid::from_raw(config.gid)),
-    );
+    let stream = connect_back(&config.connect_path)?;
+    let authorized_uid = peer_uid(&stream).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "could not read the identity of the requesting process",
+        )
+    })?;
 
-    touch_activity();
-    spawn_idle_watchdog(config.socket_path.clone());
-
-    println!("READY");
-    use std::io::Write;
-    let _ = io::stdout().flush();
-
-    let authorized = config.uid;
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-        std::thread::spawn(move || handle_connection(stream, authorized));
-    }
+    serve(stream, authorized_uid);
     return Ok(());
 }
 
-fn touch_activity() {
-    if let Ok(mut guard) = LAST_ACTIVITY.lock() {
-        *guard = Some(Instant::now());
+fn set_non_dumpable() {
+    unsafe {
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
     }
 }
 
-fn spawn_idle_watchdog(socket_path: PathBuf) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(Duration::from_secs(30));
-            if ACTIVE_OPS.load(Ordering::SeqCst) > 0 {
-                touch_activity();
-                continue;
-            }
-            let idle = LAST_ACTIVITY
-                .lock()
-                .ok()
-                .and_then(|g| *g)
-                .map(|t| t.elapsed())
-                .unwrap_or(Duration::ZERO);
-            if idle > IDLE_TIMEOUT {
-                let _ = std::fs::remove_file(&socket_path);
-                std::process::exit(0);
+fn connect_back(path: &Path) -> io::Result<UnixStream> {
+    let mut last_err = io::Error::new(io::ErrorKind::NotFound, "control socket not found");
+    for _ in 0..CONNECT_ATTEMPTS {
+        match UnixStream::connect(path) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => {
+                last_err = e;
+                sleep(Duration::from_millis(100));
             }
         }
-    });
+    }
+    return Err(last_err);
 }
 
 fn peer_uid(stream: &UnixStream) -> Option<u32> {
     return getsockopt(stream, PeerCredentials).ok().map(|c| c.uid());
 }
 
-fn handle_connection(mut stream: UnixStream, authorized_uid: u32) {
-    match peer_uid(&stream) {
-        Some(uid) if uid == authorized_uid || uid == 0 => {}
-        _ => {
-            let _ = write_response(&mut stream, &Response::error("unauthorized peer"));
+fn serve(stream: UnixStream, authorized_uid: u32) {
+    let mut stream = stream;
+    loop {
+        let received = match recv_request(&stream) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let resp = match received.req.op {
+            Op::NewSession => spawn_session(received.fds, authorized_uid),
+            _ => execute(&received.req, received.fds, authorized_uid),
+        };
+        if write_response(&mut stream, &resp).is_err() {
             return;
-        }
-    }
-
-    touch_activity();
-
-    let received = match recv_request(&stream) {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = write_response(&mut stream, &Response::error(format!("bad request: {e}")));
-            return;
-        }
-    };
-
-    match received.req.op {
-        Op::Attach => hold_attach(stream),
-        Op::Ping => {
-            let _ = write_response(&mut stream, &Response::Pong);
-        }
-        Op::Shutdown => {
-            let _ = write_response(
-                &mut stream,
-                &Response::Done {
-                    exit_code: 0,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                },
-            );
-            std::process::exit(0);
-        }
-        _ => {
-            ACTIVE_OPS.fetch_add(1, Ordering::SeqCst);
-            let resp = execute(&received.req, received.fds, authorized_uid);
-            ACTIVE_OPS.fetch_sub(1, Ordering::SeqCst);
-            touch_activity();
-            let _ = write_response(&mut stream, &resp);
         }
     }
 }
 
-fn hold_attach(mut stream: UnixStream) {
-    let mut buf = [0u8; 64];
-    loop {
-        match stream.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
-    }
-    std::process::exit(0);
+fn spawn_session(mut fds: Vec<OwnedFd>, authorized_uid: u32) -> Response {
+    let Some(fd) = fds.pop() else {
+        return Response::error("a new session needs a socket");
+    };
+    let session = UnixStream::from(fd);
+    spawn(move || serve(session, authorized_uid));
+    return done_ok();
 }
 
 fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
@@ -276,7 +214,7 @@ fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
         ),
         Op::RefreshMirrors { tool } => run_refresh_mirrors(*tool, fds),
         Op::RunPacdiff => run_tty_or_err("pacdiff", &[], &[("DIFFPROG", "")], fds),
-        Op::Attach | Op::Ping | Op::Shutdown => Response::error("unexpected control op"),
+        Op::NewSession => Response::error("a new session is handled by the server loop"),
     }
 }
 

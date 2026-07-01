@@ -36,6 +36,10 @@ impl PackageUpdateObject {
         return self.imp().data.borrow().clone();
     }
 
+    pub fn is_selected(&self) -> bool {
+        return self.imp().data.borrow().selected;
+    }
+
     pub fn set_selected(&self, selected: bool) {
         let mut data = self.imp().data.borrow_mut();
         data.selected = selected;

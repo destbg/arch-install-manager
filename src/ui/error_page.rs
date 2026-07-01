@@ -5,7 +5,8 @@ use gtk4::{Box as GtkBox, Button, Image, Label, Orientation, ScrolledWindow, Tex
 use crate::helpers::database_lock::is_lock_error;
 use crate::helpers::get_navigation_stack::get_navigation_stack;
 use crate::ipc::client;
-use crate::ipc::protocol::{Op, Response};
+use crate::models::op::Op;
+use crate::models::response::Response;
 use crate::ui::dialogs::show_error_dialog;
 use crate::ui::main_window::load_packages;
 

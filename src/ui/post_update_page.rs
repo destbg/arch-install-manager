@@ -324,7 +324,7 @@ pub fn set_services_section(page: &PostUpdatePage, services: Vec<String>) {
 
 pub fn run_post_update_command(window: &ApplicationWindow, command: &str) {
     let window_for_refresh = window.clone();
-    run_command_in_dialog(window, command, false, move || {
+    run_command_in_dialog(window, command, true, false, move || {
         refresh_post_update(&window_for_refresh);
     });
 }

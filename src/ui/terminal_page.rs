@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{Align, ApplicationWindow, Box as GtkBox, Button, Frame, Label, Orientation};
+use gtk4::{Align, ApplicationWindow, Box as GtkBox, Button, Frame, Label, Orientation, Window};
 use std::rc::Rc;
 use vte4::prelude::*;
 use vte4::{Format, Terminal};
@@ -8,7 +8,9 @@ use crate::helpers::get_navigation_stack::get_navigation_stack;
 use crate::helpers::settings::load_settings;
 use crate::helpers::terminal::spawn_terminal;
 use crate::helpers::tray_integration::trigger_check_service;
+use crate::ipc::client::mint_terminal_session;
 use crate::log_info;
+use crate::ui::dialogs::show_error_dialog;
 use crate::ui::main_window::{POST_UPDATE_PAGE, load_packages};
 use crate::ui::post_update_page::{
     create_post_update_page, reset_post_update_page, run_post_update_detections,
@@ -17,11 +19,28 @@ use crate::ui::post_update_page::{
 pub fn run_command_in_dialog<F>(
     window: &ApplicationWindow,
     command: &str,
+    needs_helper: bool,
     offer_checks: bool,
     on_finished: F,
 ) where
     F: Fn() + 'static,
 {
+    let session = if needs_helper {
+        match mint_terminal_session() {
+            Ok(fd) => Some(fd),
+            Err(e) => {
+                show_error_dialog(
+                    window.upcast_ref::<Window>(),
+                    "Could not get admin rights",
+                    &e.to_string(),
+                );
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
     let dialog = gtk4::Window::builder()
         .title("Running command")
         .transient_for(window)
@@ -147,12 +166,12 @@ pub fn run_command_in_dialog<F>(
 
     log_info!("spawning dialog terminal command: {}", command);
     dialog.present();
-    spawn_terminal(&terminal, vec!["bash", "-lc", command]);
+    spawn_terminal(&terminal, vec!["bash", "-lc", command], session);
 }
 
-pub fn run_update_install_dialog(window: &ApplicationWindow, command: &str) {
+pub fn run_update_install_dialog(window: &ApplicationWindow, command: &str, needs_helper: bool) {
     let window_for_finish = window.clone();
-    run_command_in_dialog(window, command, true, move || {
+    run_command_in_dialog(window, command, needs_helper, true, move || {
         refresh_update_list(&window_for_finish);
     });
 }

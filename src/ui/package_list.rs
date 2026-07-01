@@ -13,7 +13,7 @@ use gio::ListStore;
 use glib::{WeakRef, clone, format_size};
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, CheckButton, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
+    Box as GtkBox, Button, CheckButton, ColumnView, ColumnViewColumn, CustomFilter, CustomSorter,
     EventSequenceState, FilterListModel, GestureClick, Label, ListItem, Ordering, Orientation,
     PropagationPhase, SearchEntry, SingleSelection, SortListModel, ToggleButton, gdk,
 };
@@ -24,6 +24,10 @@ use std::rc::Rc;
 thread_local! {
     static FAVORITE_BUTTONS: RefCell<HashMap<String, WeakRef<ToggleButton>>> =
         RefCell::new(HashMap::new());
+}
+
+thread_local! {
+    static SELECTION_LISTENERS: RefCell<Vec<Box<dyn Fn() -> bool>>> = RefCell::new(Vec::new());
 }
 
 pub fn refresh_favorite_button(name: &str, is_favorite: bool) {
@@ -41,6 +45,28 @@ pub fn refresh_all_favorite_buttons(is_favorite: bool) {
         for weak in map.borrow().values() {
             apply_favorite_state(weak, is_favorite);
         }
+    });
+}
+
+pub fn register_selection_button(button: &Button, store: &ListStore) {
+    apply_selection_state(button, store);
+
+    let weak_button = button.downgrade();
+    let weak_store = store.downgrade();
+    SELECTION_LISTENERS.with(|listeners| {
+        listeners.borrow_mut().push(Box::new(move || {
+            let (Some(button), Some(store)) = (weak_button.upgrade(), weak_store.upgrade()) else {
+                return false;
+            };
+            apply_selection_state(&button, &store);
+            return true;
+        }));
+    });
+}
+
+pub fn notify_selection_changed() {
+    SELECTION_LISTENERS.with(|listeners| {
+        listeners.borrow_mut().retain(|listener| listener());
     });
 }
 
@@ -566,6 +592,7 @@ fn create_upgrade_column(
 
                     update_statusbar(&statusbar, &store, &noun);
                     save_unselected_from_store(&store);
+                    notify_selection_changed();
                 }
             ));
 
@@ -631,6 +658,21 @@ fn apply_range_selection(
     for item in items {
         store.append(&item);
     }
+}
+
+fn apply_selection_state(button: &Button, store: &ListStore) {
+    button.set_sensitive(any_selected(store));
+}
+
+fn any_selected(store: &ListStore) -> bool {
+    for i in 0..store.n_items() {
+        if let Some(obj) = store.item(i).and_downcast::<PackageUpdateObject>() {
+            if obj.is_selected() {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 fn apply_favorite_range(

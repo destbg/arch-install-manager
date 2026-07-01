@@ -1,74 +1,71 @@
-use std::io;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use arch_install_manager::ipc::protocol::{Op, Request, Response, read_response, send_request};
+use arch_install_manager::ipc::protocol::{read_response, send_request};
+use arch_install_manager::models::op::Op;
+use arch_install_manager::models::request::Request;
+use arch_install_manager::models::response::Response;
 
-fn connect_with_retry(sock: &std::path::Path, deadline: Instant) -> UnixStream {
+fn accept_with_deadline(listener: &UnixListener, deadline: Instant) -> UnixStream {
+    listener.set_nonblocking(true).unwrap();
     loop {
-        if let Ok(s) = UnixStream::connect(sock) {
-            return s;
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() > deadline {
+                    panic!("daim-helper never connected back");
+                }
+                sleep(Duration::from_millis(50));
+            }
+            Err(e) => panic!("accept failed: {e}"),
         }
-        if Instant::now() > deadline {
-            panic!("daim-helper never accepted connections");
-        }
-        std::thread::sleep(Duration::from_millis(50));
     }
-}
-
-fn round_trip(sock: &std::path::Path, op: Op, with_tty: bool) -> io::Result<Response> {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut stream = connect_with_retry(sock, deadline);
-    send_request(&stream, &Request { op, with_tty }, &[])?;
-    return read_response(&mut stream);
 }
 
 #[test]
 fn helper_ipc_round_trip() {
     let dir = std::env::temp_dir().join(format!("daim-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let sock = dir.join("helper.sock");
+    let sock = dir.join("ctl.sock");
+    let _ = std::fs::remove_file(&sock);
 
-    let uid = unsafe { libc::geteuid() }.to_string();
-    let gid = unsafe { libc::getegid() }.to_string();
+    let listener = UnixListener::bind(&sock).unwrap();
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_daim-helper"))
-        .args([
-            "--uid",
-            &uid,
-            "--gid",
-            &gid,
-            "--socket",
-            sock.to_str().unwrap(),
-        ])
+        .args(["--connect", sock.to_str().unwrap()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn daim-helper");
 
-    let pong = round_trip(&sock, Op::Ping, false).expect("ping");
-    assert!(
-        matches!(pong, Response::Pong),
-        "expected Pong, got {pong:?}"
-    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut stream = accept_with_deadline(&listener, deadline);
 
-    let err = round_trip(
-        &sock,
-        Op::Install {
-            targets: vec![],
-            as_deps: false,
-            reinstall: false,
+    send_request(
+        &stream,
+        &Request {
+            op: Op::Install {
+                targets: vec![],
+                as_deps: false,
+                reinstall: false,
+            },
+            with_tty: false,
         },
-        false,
+        &[],
     )
-    .expect("install");
+    .expect("send install");
+    let err = read_response(&mut stream).expect("install response");
     assert!(
         matches!(err, Response::Error { .. }),
         "expected Error, got {err:?}"
     );
 
-    let _ = child.kill();
+    drop(stream);
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);
 }

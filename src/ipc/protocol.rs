@@ -4,120 +4,13 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
 use nix::sys::socket::{ControlMessage, ControlMessageOwned, MsgFlags, recvmsg, sendmsg};
-use serde::{Deserialize, Serialize};
+
+use crate::models::received_request::ReceivedRequest;
+use crate::models::request::Request;
+use crate::models::response::Response;
 
 pub fn socket_dir_for_uid(uid: u32) -> PathBuf {
     return PathBuf::from(format!("/run/user/{uid}/daim"));
-}
-
-pub fn socket_path_for_uid(uid: u32) -> PathBuf {
-    return socket_dir_for_uid(uid).join("helper.sock");
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum MirrorTool {
-    RateMirrors,
-    Reflector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Op {
-    Attach,
-    Ping,
-    Shutdown,
-    SyncDb,
-    SysUpgrade,
-    SysUpgradeNoConfirm,
-    Install {
-        targets: Vec<String>,
-        as_deps: bool,
-        reinstall: bool,
-    },
-    InstallFiles {
-        paths: Vec<String>,
-        as_deps: bool,
-    },
-    AurBuildInstall {
-        name: String,
-        as_deps: bool,
-    },
-    RemoveMakeDeps {
-        targets: Vec<String>,
-    },
-    Remove {
-        targets: Vec<String>,
-        cascade: bool,
-        nosave: bool,
-    },
-    SetIgnorePkg {
-        name: String,
-        ignored: bool,
-    },
-    RemoveDbLock,
-    PaccacheClean {
-        keep: u32,
-        keep_uninstalled: u32,
-    },
-    RestartService {
-        name: String,
-    },
-    SnapshotTimeshift {
-        comment: String,
-    },
-    SnapshotSnapper {
-        description: String,
-    },
-    RefreshMirrors {
-        tool: MirrorTool,
-    },
-    RunPacdiff,
-}
-
-impl Op {
-    pub fn wants_tty(&self) -> bool {
-        return matches!(
-            self,
-            Op::SysUpgrade
-                | Op::Install { .. }
-                | Op::InstallFiles { .. }
-                | Op::AurBuildInstall { .. }
-                | Op::Remove { .. }
-                | Op::RefreshMirrors { .. }
-                | Op::SnapshotSnapper { .. }
-                | Op::RunPacdiff
-        );
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Request {
-    pub op: Op,
-    pub with_tty: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Response {
-    Done {
-        exit_code: i32,
-        stdout: String,
-        stderr: String,
-    },
-    Error {
-        message: String,
-    },
-    Pong,
-}
-
-impl Response {
-    pub fn is_success(&self) -> bool {
-        return matches!(self, Response::Done { exit_code: 0, .. } | Response::Pong);
-    }
-
-    pub fn error(message: impl Into<String>) -> Self {
-        return Response::Error {
-            message: message.into(),
-        };
-    }
 }
 
 pub fn send_request(stream: &UnixStream, req: &Request, fds: &[RawFd]) -> io::Result<()> {
@@ -191,11 +84,6 @@ fn frame(body: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&(body.len() as u32).to_be_bytes());
     out.extend_from_slice(body);
     return out;
-}
-
-pub struct ReceivedRequest {
-    pub req: Request,
-    pub fds: Vec<OwnedFd>,
 }
 
 fn read_frame(stream: &mut UnixStream) -> io::Result<Vec<u8>> {

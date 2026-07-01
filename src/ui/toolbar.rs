@@ -748,6 +748,11 @@ fn navigate_to_terminal_and_install(
     create_timeshift: bool,
     create_snapper: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let needs_helper = !official_packages.is_empty()
+        || !aur_packages.is_empty()
+        || create_timeshift
+        || create_snapper;
+
     let Some(command) = build_install_command(
         official_packages,
         aur_packages,
@@ -760,7 +765,7 @@ fn navigate_to_terminal_and_install(
         return Ok(());
     };
 
-    run_update_install_dialog(window, &command);
+    run_update_install_dialog(window, &command, needs_helper);
 
     return Ok(());
 }

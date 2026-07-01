@@ -4,9 +4,10 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::ipc::client;
-use crate::ipc::protocol::{Op, Response};
 use crate::models::cache_candidates::CacheCandidates;
+use crate::models::op::Op;
 use crate::models::paccache_dry_result::PaccacheDryResult;
+use crate::models::response::Response;
 use crate::models::service_restart_outcome::ServiceRestartOutcome;
 
 pub fn get_pacnew_files() -> Result<Vec<String>> {
@@ -162,12 +163,6 @@ pub fn restart_service(service: &str) -> ServiceRestartOutcome {
             exit_code: None,
             stdout: String::new(),
             stderr: message,
-        },
-        Ok(_) => ServiceRestartOutcome {
-            success: false,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: "unexpected helper response".to_string(),
         },
         Err(e) => ServiceRestartOutcome {
             success: false,

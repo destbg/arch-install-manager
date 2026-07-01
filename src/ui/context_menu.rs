@@ -82,7 +82,7 @@ pub fn show_package_context_menu(
                 };
                 let window_proceed = window.clone();
                 review_then_install(&window, aur_names, move || {
-                    run_command_in_dialog(&window_proceed, &command, true, || {});
+                    run_command_in_dialog(&window_proceed, &command, true, true, || {});
                 });
             }
         });
@@ -99,7 +99,7 @@ pub fn show_package_context_menu(
                 let command = format!("daim remove {}", quoted);
                 let window_finish = window.clone();
                 let name_finish = name.clone();
-                run_command_in_dialog(&window, &command, true, move || {
+                run_command_in_dialog(&window, &command, true, true, move || {
                     refresh_manage_list();
                     remove_from_update_list(&window_finish, std::slice::from_ref(&name_finish));
                 });

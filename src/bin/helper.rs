@@ -8,7 +8,7 @@ fn main() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("daim-helper: {e}");
-            eprintln!("usage: daim-helper --uid <uid> --gid <gid> --socket <path>");
+            eprintln!("usage: daim-helper --connect <path>");
             exit(2);
         }
     };
@@ -20,42 +20,19 @@ fn main() {
 }
 
 fn parse_args() -> Result<Config, String> {
-    let mut uid: Option<u32> = None;
-    let mut gid: Option<u32> = None;
-    let mut socket: Option<PathBuf> = None;
+    let mut connect_path: Option<PathBuf> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--uid" => {
-                uid = Some(
-                    next_value(&mut args, "--uid")?
-                        .parse()
-                        .map_err(|_| "invalid uid")?,
-                )
-            }
-            "--gid" => {
-                gid = Some(
-                    next_value(&mut args, "--gid")?
-                        .parse()
-                        .map_err(|_| "invalid gid")?,
-                )
-            }
-            "--socket" => socket = Some(PathBuf::from(next_value(&mut args, "--socket")?)),
+            "--connect" => connect_path = Some(PathBuf::from(next_value(&mut args, "--connect")?)),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
 
-    let uid = uid.ok_or("missing --uid")?;
-    let gid = gid.ok_or("missing --gid")?;
-    let socket_path =
-        socket.unwrap_or_else(|| arch_install_manager::ipc::protocol::socket_path_for_uid(uid));
+    let connect_path = connect_path.ok_or("missing --connect")?;
 
-    return Ok(Config {
-        uid,
-        gid,
-        socket_path,
-    });
+    return Ok(Config { connect_path });
 }
 
 fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {

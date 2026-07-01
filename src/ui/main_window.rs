@@ -12,7 +12,6 @@ use crate::helpers::settings::{load_settings, save_settings};
 use crate::helpers::tray_integration::trigger_check_service;
 use crate::helpers::unselected_packages::load_unselected_packages;
 use crate::ipc::client::{attach_session, set_ignore_pkg};
-use crate::ipc::protocol::Response;
 use crate::log_info;
 use crate::models::info_panel::InfoPanel;
 use crate::models::package_list_kind::PackageListKind;
@@ -20,6 +19,7 @@ use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
 use crate::models::post_update_page::PostUpdatePage;
+use crate::models::response::Response;
 use crate::models::search_sources::SearchSources;
 use crate::models::update_error::UpdateError;
 use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog};
@@ -29,7 +29,10 @@ use crate::ui::info_panel::{create_info_panel, update_ignore_button_tooltip};
 use crate::ui::install_review::review_then_install;
 use crate::ui::news_dialog::show_news_dialog;
 use crate::ui::no_updates::create_no_updates_page;
-use crate::ui::package_list::{create_package_list, format_age, prefers_dark, update_statusbar};
+use crate::ui::package_list::{
+    create_package_list, format_age, notify_selection_changed, prefers_dark,
+    register_selection_button, update_statusbar,
+};
 use crate::ui::settings_dialog::show_settings_dialog;
 use crate::ui::terminal_page::run_command_in_dialog;
 use crate::ui::toolbar::create_toolbar;
@@ -429,7 +432,7 @@ fn build_mirror_banner(window: &ApplicationWindow) -> GtkBox {
         };
         log_info!("mirror banner: Refresh mirrors clicked");
         let banner = banner_for_refresh.clone();
-        run_command_in_dialog(&window_for_refresh, &command, false, move || {
+        run_command_in_dialog(&window_for_refresh, &command, true, false, move || {
             banner.set_visible(false);
         });
     });
@@ -1008,9 +1011,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     let tab = GtkBox::new(Orientation::Vertical, 0);
 
     let search_entry = SearchEntry::new();
-    search_entry.set_placeholder_text(Some(
-        "Search the official repositories, then press Enter",
-    ));
+    search_entry.set_placeholder_text(Some("Search the official repositories, then press Enter"));
     search_entry.set_hexpand(true);
 
     let official_toggle = source_filter_toggle(
@@ -1087,6 +1088,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
                         .await
                         .unwrap_or_default();
                     store.remove_all();
+                    notify_selection_changed();
                     for pkg in results {
                         if source_selected(&sources, pkg.source) {
                             store.append(&PackageUpdateObject::new(pkg));
@@ -1103,6 +1105,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
                     .await
                     .unwrap_or_default();
                 store.remove_all();
+                notify_selection_changed();
                 for pkg in results {
                     store.append(&PackageUpdateObject::new(pkg));
                 }
@@ -1179,11 +1182,13 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         let refresh = run_search_for_install.clone();
         review_then_install(&window_for_install, aur_names, move || {
             let refresh = refresh.clone();
-            run_command_in_dialog(&window, &command, true, move || {
+            run_command_in_dialog(&window, &command, true, true, move || {
                 refresh();
             });
         });
     });
+
+    register_selection_button(&install_btn, &store);
 
     wire_type_to_search(&tab, &search_entry);
 
@@ -1348,6 +1353,7 @@ fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
                 .await
                 .unwrap_or_default();
             store.remove_all();
+            notify_selection_changed();
             for pkg in packages {
                 store.append(&PackageUpdateObject::new(pkg));
             }
@@ -1381,6 +1387,8 @@ fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
         }),
     );
 
+    register_selection_button(&remove_btn, &store);
+
     let window_for_orphans = window.clone();
     let populate_for_orphans = populate.clone();
     orphans_btn.connect_clicked(move |_| {
@@ -1389,6 +1397,7 @@ fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
         run_command_in_dialog(
             &window_for_orphans,
             "orphans=$(pacman -Qtdq); if [ -n \"$orphans\" ]; then daim remove --cascade $orphans; else echo 'No orphan packages found.'; fi",
+            true,
             true,
             move || populate(),
         );
@@ -1445,7 +1454,7 @@ fn wire_manage_action(
         let command = build_command(&names);
         let populate = populate.clone();
         let window_finish = window.clone();
-        run_command_in_dialog(&window, &command, true, move || {
+        run_command_in_dialog(&window, &command, true, true, move || {
             populate();
             remove_from_update_list(&window_finish, &names);
         });

@@ -17,11 +17,12 @@ use crate::helpers::repo_switches::detect_repo_switches;
 use crate::helpers::search::search_packages;
 use crate::helpers::settings::load_settings;
 use crate::ipc::client;
-use crate::ipc::protocol::{Op, Response};
 use crate::models::aur_build::AurBuild;
 use crate::models::aur_plan::AurPlan;
+use crate::models::op::Op;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
+use crate::models::response::Response;
 use crate::models::search_sources::SearchSources;
 
 mod picker;
@@ -792,7 +793,6 @@ fn report_failure(resp: &Response) -> i32 {
             eprintln!("daim: {message}");
             1
         }
-        Response::Pong => 0,
     }
 }
 
