@@ -23,7 +23,8 @@ use crate::{
     },
     ui::{
         appimage_sources::build_appimage_sources_section,
-        blacklist_dialog::show_manage_blacklist_dialog, dialogs::show_confirm_dialog,
+        blacklist_dialog::show_manage_blacklist_dialog,
+        dialogs::show_confirm_dialog,
         package_list::{refresh_all_favorite_buttons, refresh_favorite_button},
     },
 };

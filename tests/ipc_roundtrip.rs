@@ -58,6 +58,7 @@ fn helper_ipc_round_trip() {
         Op::Install {
             targets: vec![],
             as_deps: false,
+            reinstall: false,
         },
         false,
     )

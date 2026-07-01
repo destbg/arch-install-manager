@@ -605,7 +605,10 @@ pub fn set_resolutions_section(
             return;
         }
 
-        let command = format!("daim install --skip-review --reinstall {}", quoted.join(" "));
+        let command = format!(
+            "daim install --skip-review --reinstall {}",
+            quoted.join(" ")
+        );
         run_post_update_command(&window_clone, &command);
     });
 

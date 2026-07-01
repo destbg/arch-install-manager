@@ -387,14 +387,9 @@ fn build_mirror_banner(window: &ApplicationWindow) -> GtkBox {
         };
         log_info!("mirror banner: Refresh mirrors clicked");
         let banner = banner_for_refresh.clone();
-        run_command_in_dialog(
-            &window_for_refresh,
-            &command,
-            false,
-            move || {
-                banner.set_visible(false);
-            },
-        );
+        run_command_in_dialog(&window_for_refresh, &command, false, move || {
+            banner.set_visible(false);
+        });
     });
     banner.append(&refresh_button);
 
