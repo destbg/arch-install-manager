@@ -24,7 +24,7 @@ The app asks for your password only when it needs it. It only asks once. When it
 Build and install it from source.
 
 ```bash
-makepkg -si
+./scripts/install.sh
 ```
 
 Or install it from the AUR with the helper you already use.
