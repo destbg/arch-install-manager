@@ -10,29 +10,35 @@ use crate::helpers::pacman_ignore::{
 };
 use crate::helpers::settings::{load_settings, save_settings};
 use crate::helpers::tray_integration::{kick_tray, trigger_check_service};
+use crate::ipc::client::attach_session;
 use crate::log_info;
+use crate::models::package_list_kind::PackageListKind;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
 use crate::ui::aur_scan_dialog::show_aur_scan_dialog;
 use crate::ui::dialogs::show_error_dialog;
 use crate::ui::downgrade_dialog::show_downgrade_dialog;
+use crate::ui::install_review::review_then_install;
 use crate::ui::main_window::load_packages;
 use crate::ui::package_files_dialog::show_package_files_dialog;
 use crate::ui::package_list::refresh_favorite_button;
 use crate::ui::pkgbuild_review_dialog::show_pkgbuild_review_dialog;
+use crate::ui::terminal_page::run_command_in_dialog;
 
 pub fn show_package_context_menu(
     anchor: &Widget,
     package: &PackageUpdate,
     x: f64,
     y: f64,
-    installed: bool,
+    kind: PackageListKind,
 ) {
     let Some(window) = anchor.root().and_downcast::<ApplicationWindow>() else {
         return;
     };
 
     log_info!("context menu opened for {}", package.name);
+
+    let installed = kind.is_installed();
 
     let popover = Popover::new();
     popover.set_position(PositionType::Bottom);
@@ -51,6 +57,43 @@ pub fn show_package_context_menu(
     let is_aur = package.source == PackageSource::Aur;
     let is_external =
         package.source == PackageSource::Flatpak || package.source == PackageSource::AppImage;
+
+    if kind == PackageListKind::Install {
+        add_action(&vbox, &popover, "Install", {
+            let name = package.name.clone();
+            let window = window.clone();
+            move || {
+                let _ = attach_session();
+                let target = if is_aur {
+                    format!("aur/{}", name)
+                } else {
+                    name.clone()
+                };
+                let command = format!("daim install --skip-review {}", target);
+                let aur_names = if is_aur {
+                    vec![name.clone()]
+                } else {
+                    Vec::new()
+                };
+                let window_proceed = window.clone();
+                review_then_install(&window, aur_names, move || {
+                    run_command_in_dialog(&window_proceed, &command, true, || {});
+                });
+            }
+        });
+        add_separator(&vbox);
+    } else if kind == PackageListKind::Manage {
+        add_action(&vbox, &popover, "Remove", {
+            let name = package.name.clone();
+            let window = window.clone();
+            move || {
+                let _ = attach_session();
+                let command = format!("daim remove {}", name);
+                run_command_in_dialog(&window, &command, true, || {});
+            }
+        });
+        add_separator(&vbox);
+    }
 
     add_action(&vbox, &popover, "Copy package name", {
         let name = package.name.clone();

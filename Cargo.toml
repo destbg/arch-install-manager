@@ -38,6 +38,7 @@ nix = { version = "0.31.3", features = [
     "process",
     "term",
 ] }
+crossterm = "0.29.0"
 
 [[bin]]
 name = "daim-gui"

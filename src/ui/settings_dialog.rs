@@ -6,6 +6,8 @@ use std::rc::Rc;
 use crate::{
     helpers::{
         aur::is_command_available,
+        desktop_apps::get_desktop_app_packages,
+        installed_packages::get_all_installed_packages,
         logger::open_logs_folder,
         pacman_repos::get_repository_groups,
         settings::{load_settings, save_settings},
@@ -22,7 +24,7 @@ use crate::{
     ui::{
         appimage_sources::build_appimage_sources_section,
         blacklist_dialog::show_manage_blacklist_dialog, dialogs::show_confirm_dialog,
-        favorites_dialog::show_manage_favorites_dialog, package_list::refresh_all_favorite_buttons,
+        package_list::{refresh_all_favorite_buttons, refresh_favorite_button},
     },
 };
 
@@ -47,7 +49,8 @@ pub fn show_settings_dialog(
     dialog.set_child(Some(&content_area));
 
     let updates_container = build_tab_container();
-    let (aur_enable_check, aur_devel_check) = create_aur_group(settings, &updates_container);
+    let (aur_enable_check, aur_devel_check, aur_always_review_check) =
+        create_aur_group(settings, &updates_container);
     let flatpak_enable_check = create_flatpak_group(settings, &updates_container);
     let (min_update_age_spin, min_update_age_aur_only_check) =
         create_update_age_group(settings, &updates_container);
@@ -80,10 +83,12 @@ pub fn show_settings_dialog(
     let appearance_container = build_tab_container();
     let (show_desc_check, show_updated_check) =
         create_show_descriptions_group(settings, &appearance_container);
-    let (fav_enable_check, fav_show_col_check, manage_btn, mode_btn) =
-        create_favorites_group(settings, &appearance_container, parent);
     let remember_unselected_check =
         create_remember_unselected_group(settings, &appearance_container);
+
+    let favorites_container = build_tab_container();
+    let (fav_enable_check, fav_show_col_check, mode_btn) =
+        create_favorites_tab(settings, &favorites_container, parent);
 
     let topbar_container = build_tab_container();
     let news_check = create_news_group(settings, &topbar_container);
@@ -92,7 +97,7 @@ pub fn show_settings_dialog(
     let system_container = build_tab_container();
     let log_retention_spin = create_logs_group(settings, &system_container);
 
-    let categories: [(&str, &str); 8] = [
+    let categories: [(&str, &str); 9] = [
         ("Updates", "software-update-available-symbolic"),
         ("AppImages", "application-x-executable-symbolic"),
         ("Repositories", "drive-harddisk-symbolic"),
@@ -102,6 +107,7 @@ pub fn show_settings_dialog(
             "preferences-system-notifications-symbolic",
         ),
         ("Appearance", "preferences-desktop-appearance-symbolic"),
+        ("Favorites", "starred-symbolic"),
         ("Top Bar", "open-menu-symbolic"),
         ("System", "emblem-system-symbolic"),
     ];
@@ -113,6 +119,7 @@ pub fn show_settings_dialog(
         maintenance_container,
         tray_container,
         appearance_container,
+        favorites_container,
         topbar_container,
         system_container,
     ];
@@ -251,10 +258,14 @@ pub fn show_settings_dialog(
         update_settings(move |s| s.enable_devel_aur = value);
     });
 
+    aur_always_review_check.connect_toggled(move |check| {
+        let value = check.is_active();
+        update_settings(move |s| s.always_show_pkgbuild = value);
+    });
+
     wire_snapshot_group_signals(&snapshot_group);
 
     let fav_show_col_for_enable = fav_show_col_check.downgrade();
-    let manage_btn_weak = manage_btn.downgrade();
     let mode_btn_weak = mode_btn.downgrade();
     let favorites_column_for_enable = favorites_column.clone();
     fav_enable_check.connect_toggled(move |check| {
@@ -268,9 +279,6 @@ pub fn show_settings_dialog(
         }
         if let Some(c) = fav_show_col_for_enable.upgrade() {
             c.set_sensitive(is_enabled);
-        }
-        if let Some(btn) = manage_btn_weak.upgrade() {
-            btn.set_sensitive(is_enabled);
         }
         if let Some(btn) = mode_btn_weak.upgrade() {
             btn.set_sensitive(is_enabled);
@@ -560,7 +568,7 @@ fn dropdown_set_active_id(dropdown: &gtk4::DropDown, id: &str) {
 fn create_aur_group(
     settings: &AppSettings,
     main_container: &gtk4::Box,
-) -> (gtk4::CheckButton, gtk4::CheckButton) {
+) -> (gtk4::CheckButton, gtk4::CheckButton, gtk4::CheckButton) {
     let aur_section = create_preference_group(
         "AUR Package Manager",
         "Enable support for installing packages from the Arch User Repository (AUR).",
@@ -578,15 +586,25 @@ fn create_aur_group(
     update_devel_sensitivity(&aur_enable_check, &devel_check);
     aur_section.append(&devel_check);
 
+    let always_review_check =
+        gtk4::CheckButton::with_label("Always show the full PKGBUILD before installing");
+    always_review_check.add_css_class("settings-check");
+    always_review_check.set_active(settings.always_show_pkgbuild);
+    always_review_check.set_margin_top(12);
+    always_review_check.set_tooltip_text(Some(
+        "When off, updates only open the review window if a line was added or removed. New installs always open it.",
+    ));
+    aur_section.append(&always_review_check);
+
     main_container.append(&aur_section);
 
-    return (aur_enable_check, devel_check);
+    return (aur_enable_check, devel_check, always_review_check);
 }
 
 fn update_devel_sensitivity(enable_check: &gtk4::CheckButton, devel_check: &gtk4::CheckButton) {
     devel_check.set_sensitive(enable_check.is_active());
     devel_check.set_tooltip_text(Some(
-        "Also check git, svn, and bzr packages for new commits, not just version bumps.",
+        "Also check git, svn and bzr packages for new commits, not just version bumps.",
     ));
 }
 
@@ -1027,16 +1045,11 @@ fn wire_snapshot_group_signals(group: &SnapshotGroup) {
         .connect_selected_notify(move |_| save_clone());
 }
 
-fn create_favorites_group(
+fn create_favorites_tab(
     settings: &AppSettings,
     main_container: &gtk4::Box,
     parent: &ApplicationWindow,
-) -> (
-    gtk4::CheckButton,
-    gtk4::CheckButton,
-    gtk4::Button,
-    gtk4::Button,
-) {
+) -> (gtk4::CheckButton, gtk4::CheckButton, gtk4::Button) {
     let section = create_preference_group(
         "Favorite Packages",
         "Mark packages as favorites to show them at the top of the package list.",
@@ -1053,43 +1066,191 @@ fn create_favorites_group(
     show_col_check.set_sensitive(settings.enable_favorites);
     section.append(&show_col_check);
 
-    let manage_btn = build_padded_button("Manage Favorite Packages");
-    manage_btn.set_sensitive(settings.enable_favorites);
-    manage_btn.set_halign(gtk4::Align::Start);
-    let parent_clone = parent.clone();
-    manage_btn.connect_clicked(move |_| {
-        show_manage_favorites_dialog(parent_clone.upcast_ref::<gtk4::Window>());
-    });
-    section.append(&manage_btn);
-
-    let mode_btn_label = if settings.favorites_exclusion_mode {
+    let mode_btn = build_padded_button(if settings.favorites_exclusion_mode {
         "Switch to Inclusion Mode"
     } else {
         "Switch to Exclusion Mode"
-    };
-    let mode_btn = build_padded_button(mode_btn_label);
+    });
     mode_btn.set_sensitive(settings.enable_favorites);
     mode_btn.set_halign(gtk4::Align::Start);
     update_mode_button_tooltip(&mode_btn, settings.favorites_exclusion_mode);
+    section.append(&mode_btn);
+
+    main_container.append(&section);
+
+    let list_section = create_preference_group(
+        "Choose favorites",
+        "Tick the packages you want to keep at the top of the list.",
+    );
+
+    let search = gtk4::SearchEntry::new();
+    search.set_placeholder_text(Some("Search packages"));
+    search.set_margin_bottom(8);
+    list_section.append(&search);
+
+    let list_box = gtk4::ListBox::new();
+    list_box.set_selection_mode(gtk4::SelectionMode::None);
+    list_box.add_css_class("boxed-list");
+
+    let all_packages = get_all_installed_packages();
+    let mut sorted_packages: Vec<String> = all_packages
+        .iter()
+        .filter(|p| settings.is_favorite(p))
+        .cloned()
+        .collect();
+    sorted_packages.extend(
+        all_packages
+            .iter()
+            .filter(|p| !settings.is_favorite(p))
+            .cloned(),
+    );
+
+    let checkboxes: Rc<RefCell<Vec<(String, gtk4::CheckButton)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+
+    for pkg_name in &sorted_packages {
+        let is_fav = settings.is_favorite(pkg_name);
+
+        let row = gtk4::ListBoxRow::new();
+        row.set_activatable(false);
+        row.set_selectable(false);
+
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        hbox.set_margin_start(8);
+        hbox.set_margin_end(8);
+        hbox.set_margin_top(4);
+        hbox.set_margin_bottom(4);
+
+        let check = gtk4::CheckButton::new();
+        check.set_active(is_fav);
+
+        let label = gtk4::Label::new(Some(pkg_name));
+        label.set_halign(gtk4::Align::Start);
+        label.set_hexpand(true);
+        if is_fav {
+            label.add_css_class("heading");
+        }
+
+        let check_weak = check.downgrade();
+        let click = gtk4::GestureClick::new();
+        click.connect_released(move |_, _, _, _| {
+            if let Some(cb) = check_weak.upgrade() {
+                cb.set_active(!cb.is_active());
+            }
+        });
+        label.add_controller(click);
+
+        let name_for_save = pkg_name.clone();
+        let label_for_save = label.clone();
+        check.connect_toggled(move |cb| {
+            let active = cb.is_active();
+            if active {
+                label_for_save.add_css_class("heading");
+            } else {
+                label_for_save.remove_css_class("heading");
+            }
+            let mut s = load_settings();
+            s.set_favorite(&name_for_save, active);
+            if let Err(e) = save_settings(&s) {
+                eprintln!("Failed to save favorite packages: {}", e);
+            } else {
+                kick_tray();
+                refresh_favorite_button(&name_for_save, active);
+            }
+        });
+
+        hbox.append(&check);
+        hbox.append(&label);
+        row.set_child(Some(&hbox));
+        list_box.append(&row);
+
+        checkboxes.borrow_mut().push((pkg_name.clone(), check));
+    }
+
+    let search_for_filter = search.clone();
+    list_box.set_filter_func(move |row| {
+        let query = search_for_filter.text().to_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+        return row
+            .child()
+            .and_downcast::<gtk4::Box>()
+            .and_then(|hbox| hbox.last_child().and_downcast::<gtk4::Label>())
+            .map(|label| label.text().to_lowercase().contains(&query))
+            .unwrap_or(true);
+    });
+    let list_box_for_search = list_box.clone();
+    search.connect_search_changed(move |_| {
+        list_box_for_search.invalidate_filter();
+    });
+
+    let list_scroll = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .min_content_height(340)
+        .max_content_height(340)
+        .child(&list_box)
+        .build();
+    list_scroll.add_css_class("frame");
+    list_section.append(&list_scroll);
+
+    let bottom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    bottom_row.set_halign(gtk4::Align::Start);
+    bottom_row.set_margin_top(8);
+
+    let add_apps_btn = gtk4::Button::with_label("Favorite desktop apps");
+    add_apps_btn.set_tooltip_text(Some(
+        "Tick every installed package that is a desktop application",
+    ));
+    let checkboxes_for_apps = checkboxes.clone();
+    add_apps_btn.connect_clicked(move |_| {
+        let desktop_apps = get_desktop_app_packages();
+        if desktop_apps.is_empty() {
+            return;
+        }
+        for (name, cb) in checkboxes_for_apps.borrow().iter() {
+            if desktop_apps.contains(name) {
+                cb.set_active(true);
+            }
+        }
+    });
+    bottom_row.append(&add_apps_btn);
+
+    let bulk_btn = gtk4::Button::with_label("Clear all");
+    update_bulk_button(&bulk_btn, settings.favorites_exclusion_mode);
+    let checkboxes_for_bulk = checkboxes.clone();
+    bulk_btn.connect_clicked(move |btn| {
+        let target = btn.label().map(|l| l == "Mark all").unwrap_or(false);
+        for (_, cb) in checkboxes_for_bulk.borrow().iter() {
+            cb.set_active(target);
+        }
+    });
+    bottom_row.append(&bulk_btn);
+
+    list_section.append(&bottom_row);
+    main_container.append(&list_section);
+
     let parent_for_mode = parent.clone();
+    let checkboxes_for_mode = checkboxes.clone();
+    let bulk_for_mode = bulk_btn.clone();
     mode_btn.connect_clicked(move |btn| {
-        let current = load_settings();
-        let switching_to_exclusion = !current.favorites_exclusion_mode;
-        let (title, message, accept_label) = if switching_to_exclusion {
+        let switching_to_exclusion = !load_settings().favorites_exclusion_mode;
+        let (title, message) = if switching_to_exclusion {
             (
                 "Switch to exclusion mode?",
                 "Every installed package becomes a favorite by default. Your current favorites list will be cleared and instead used to track packages you exclude from favorites.",
-                "Switch",
             )
         } else {
             (
                 "Switch to inclusion mode?",
                 "Your current exclusion list will be cleared. After this, no package is a favorite until you mark it.",
-                "Switch",
             )
         };
         let btn_for_response = btn.clone();
-        show_confirm_dialog(&parent_for_mode, title, message, accept_label, move |accepted| {
+        let checkboxes_for_response = checkboxes_for_mode.clone();
+        let bulk_for_response = bulk_for_mode.clone();
+        show_confirm_dialog(&parent_for_mode, title, message, "Switch", move |accepted| {
             if !accepted {
                 return;
             }
@@ -1098,23 +1259,38 @@ fn create_favorites_group(
             s.favorite_packages.clear();
             if let Err(e) = save_settings(&s) {
                 eprintln!("Failed to save favorites mode: {}", e);
-            } else {
-                refresh_all_favorite_buttons(switching_to_exclusion);
-                btn_for_response.set_label(if switching_to_exclusion {
-                    "Switch to Inclusion Mode"
-                } else {
-                    "Switch to Exclusion Mode"
-                });
-                update_mode_button_tooltip(&btn_for_response, switching_to_exclusion);
-                kick_tray();
+                return;
             }
+            refresh_all_favorite_buttons(switching_to_exclusion);
+            btn_for_response.set_label(if switching_to_exclusion {
+                "Switch to Inclusion Mode"
+            } else {
+                "Switch to Exclusion Mode"
+            });
+            update_mode_button_tooltip(&btn_for_response, switching_to_exclusion);
+            update_bulk_button(&bulk_for_response, switching_to_exclusion);
+            for (_, cb) in checkboxes_for_response.borrow().iter() {
+                cb.set_active(switching_to_exclusion);
+            }
+            kick_tray();
         });
     });
-    section.append(&mode_btn);
 
-    main_container.append(&section);
+    return (enable_check, show_col_check, mode_btn);
+}
 
-    return (enable_check, show_col_check, manage_btn, mode_btn);
+fn update_bulk_button(button: &gtk4::Button, exclusion_mode: bool) {
+    if exclusion_mode {
+        button.set_label("Mark all");
+        button.remove_css_class("destructive-action");
+        button.add_css_class("suggested-action");
+        button.set_tooltip_text(Some("Tick every package in the list"));
+    } else {
+        button.set_label("Clear all");
+        button.remove_css_class("suggested-action");
+        button.add_css_class("destructive-action");
+        button.set_tooltip_text(Some("Uncheck every package in the list"));
+    }
 }
 
 fn update_mode_button_tooltip(button: &gtk4::Button, exclusion_mode: bool) {
@@ -1274,7 +1450,7 @@ fn create_post_update_group(
 ) -> gtk4::CheckButton {
     let section = create_preference_group(
         "Post-Update Checks",
-        "After installing updates, open a checks page that helps with orphan packages, cache cleanup, services that need a restart, and more.",
+        "After installing updates, open a checks page that helps with orphan packages, cache cleanup, services that need a restart and more.",
     );
 
     let check = gtk4::CheckButton::with_label("Run checks after install");

@@ -147,8 +147,9 @@ pub fn show_downgrade_dialog(parent: &ApplicationWindow, package: &str, current_
         dialog_for_install.close();
         let window_for_reload = parent_clone.clone();
         run_command_in_dialog(
-            parent_clone.upcast_ref::<gtk4::Window>(),
+            &parent_clone,
             &command,
+            false,
             move || {
                 reload_package_list(&window_for_reload);
             },

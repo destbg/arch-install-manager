@@ -153,11 +153,19 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
     match &req.op {
         Op::SyncDb => run_capture("pacman", &["-Sy"]),
         Op::SysUpgrade => run_tty_or_err("pacman", &["-Su"], &[], fds),
-        Op::Install { targets, as_deps } => {
+        Op::SysUpgradeNoConfirm => run_capture("pacman", &["-Su", "--noconfirm"]),
+        Op::Install {
+            targets,
+            as_deps,
+            reinstall,
+        } => {
             if let Err(e) = validate_names(targets) {
                 return Response::error(e);
             }
-            let mut args = vec!["-S", "--needed"];
+            let mut args = vec!["-S"];
+            if !*reinstall {
+                args.push("--needed");
+            }
             if *as_deps {
                 args.push("--asdeps");
             }
@@ -174,6 +182,14 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
             }
             args.extend(paths.iter().map(|s| s.as_str()));
             run_tty_or_err("pacman", &args, &[], fds)
+        }
+        Op::RemoveMakeDeps { targets } => {
+            if let Err(e) = validate_names(targets) {
+                return Response::error(e);
+            }
+            let mut args = vec!["-Rs", "--noconfirm"];
+            args.extend(targets.iter().map(|s| s.as_str()));
+            run_capture("pacman", &args)
         }
         Op::Remove {
             targets,

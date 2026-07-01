@@ -91,6 +91,8 @@ pub struct AppSettings {
     pub install_search_aur: bool,
     #[serde(default)]
     pub install_search_flatpak: bool,
+    #[serde(default)]
+    pub always_show_pkgbuild: bool,
 }
 
 impl AppSettings {

@@ -11,6 +11,7 @@ pub mod desktop_apps;
 pub mod disk_space;
 pub mod elevated;
 pub mod flatpak;
+pub mod format;
 pub mod get_navigation_stack;
 pub mod history;
 pub mod installed_packages;

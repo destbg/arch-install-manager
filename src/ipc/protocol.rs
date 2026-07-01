@@ -27,13 +27,18 @@ pub enum Op {
     Shutdown,
     SyncDb,
     SysUpgrade,
+    SysUpgradeNoConfirm,
     Install {
         targets: Vec<String>,
         as_deps: bool,
+        reinstall: bool,
     },
     InstallFiles {
         paths: Vec<String>,
         as_deps: bool,
+    },
+    RemoveMakeDeps {
+        targets: Vec<String>,
     },
     Remove {
         targets: Vec<String>,

@@ -29,6 +29,7 @@ pub struct PackageUpdate {
     pub aur_scan_findings: Vec<AurScanFinding>,
     pub flatpak_installation: Option<FlatpakInstallation>,
     pub appimage_path: Option<String>,
+    pub is_repo_switch: bool,
 }
 
 impl PackageUpdate {
@@ -74,6 +75,7 @@ impl Default for PackageUpdate {
             aur_scan_findings: Vec::new(),
             flatpak_installation: None,
             appimage_path: None,
+            is_repo_switch: false,
         };
     }
 }

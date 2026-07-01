@@ -1,4 +1,4 @@
-use alpm::{Alpm, SigLevel};
+use alpm::{Alpm, PackageValidation, SigLevel};
 use std::collections::HashSet;
 
 use crate::helpers::aur::search_aur_packages;
@@ -60,6 +60,8 @@ pub fn search_packages(term: &str, sources: SearchSources) -> Vec<PackageUpdate>
             .then_with(|| a.name.cmp(&b.name));
     });
 
+    mark_installed(&mut out);
+
     return out;
 }
 
@@ -100,7 +102,36 @@ pub fn featured_packages() -> Vec<PackageUpdate> {
         }
     }
 
+    mark_installed(&mut out);
+
     return out;
+}
+
+fn mark_installed(packages: &mut [PackageUpdate]) {
+    let Ok(conf) = pacmanconf::Config::new() else {
+        return;
+    };
+    let Ok(alpm) = Alpm::new(conf.root_dir.as_str(), conf.db_path.as_str()) else {
+        return;
+    };
+    let localdb = alpm.localdb();
+    for package in packages.iter_mut() {
+        if package.source == PackageSource::Flatpak || package.source == PackageSource::AppImage {
+            continue;
+        }
+        let Ok(local) = localdb.pkg(package.name.as_str()) else {
+            continue;
+        };
+        let installed_from_repo = local.validation().contains(PackageValidation::SIGNATURE);
+        let matches_source = match package.source {
+            PackageSource::Official => installed_from_repo,
+            PackageSource::Aur => !installed_from_repo,
+            _ => false,
+        };
+        if matches_source {
+            package.current_version = local.version().to_string();
+        }
+    }
 }
 
 fn match_rank(name: &str, description: &str, needle: &str) -> u8 {

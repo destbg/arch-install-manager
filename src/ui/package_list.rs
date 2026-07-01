@@ -1,8 +1,10 @@
-use crate::constants::is_own_package;
+use crate::constants::{is_own_package, is_recently_created};
+use crate::helpers::format::{format_build_date, plural};
 use crate::helpers::settings::{load_settings, save_settings};
 use crate::helpers::tray_integration::kick_tray;
 use crate::helpers::unselected_packages::save_unselected_packages;
 use crate::log_info;
+use crate::models::package_list_kind::PackageListKind;
 use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
@@ -45,7 +47,7 @@ pub fn refresh_all_favorite_buttons(is_favorite: bool) {
 pub fn create_package_list(
     search_entry: &SearchEntry,
     noun: &str,
-    installed: bool,
+    kind: PackageListKind,
 ) -> (ColumnView, ListStore, Label, CustomFilter) {
     let store = ListStore::new::<PackageUpdateObject>();
     let statusbar = Label::new(None);
@@ -83,10 +85,10 @@ pub fn create_package_list(
     selection_model.set_can_unselect(true);
     column_view.set_model(Some(&selection_model));
 
-    create_favorite_column(&column_view);
+    create_favorite_column(&column_view, kind);
     create_repository_column(&column_view);
     create_upgrade_column(&column_view, &store, &statusbar, noun);
-    create_name_column(&column_view, installed);
+    create_name_column(&column_view, kind);
     create_version_column(&column_view);
     create_size_column(&column_view);
 
@@ -189,52 +191,6 @@ pub(crate) fn severity_color(severity: &str, dark: bool) -> &'static str {
     };
 }
 
-pub(crate) fn format_build_date(timestamp: i64) -> String {
-    use chrono::{Local, TimeZone, Utc};
-
-    const HOUR: i64 = 3600;
-    const DAY: i64 = 24 * HOUR;
-    const WEEK: i64 = 7 * DAY;
-
-    let absolute_date = || {
-        Local
-            .timestamp_opt(timestamp, 0)
-            .single()
-            .map(|dt| dt.format("%Y-%m-%d").to_string())
-            .unwrap_or_default()
-    };
-
-    let diff = Utc::now().timestamp() - timestamp;
-    if diff < 0 || diff >= WEEK {
-        return absolute_date();
-    }
-
-    if diff < HOUR {
-        let minutes = diff / 60;
-        if minutes < 1 {
-            return "just now".to_string();
-        }
-        return format!("{} minute{} ago", minutes, plural(minutes));
-    }
-
-    if diff < DAY {
-        let hours = diff / HOUR;
-        return format!("{} hour{} ago", hours, plural(hours));
-    }
-
-    let days = diff / DAY;
-    return format!("{} day{} ago", days, plural(days));
-}
-
-pub(crate) fn is_recently_created(first_submitted: Option<i64>) -> bool {
-    const WEEK: i64 = 7 * 24 * 3600;
-    let Some(ts) = first_submitted else {
-        return false;
-    };
-    let diff = chrono::Utc::now().timestamp() - ts;
-    return diff >= 0 && diff < WEEK;
-}
-
 pub(crate) fn format_age(timestamp: i64) -> String {
     const DAY: i64 = 24 * 3600;
     const MONTH: i64 = 30 * DAY;
@@ -326,7 +282,7 @@ fn attach_deselect_gesture(
     cell.add_controller(gesture);
 }
 
-fn create_favorite_column(column_view: &ColumnView) {
+fn create_favorite_column(column_view: &ColumnView, kind: PackageListKind) {
     let css = gtk4::CssProvider::new();
     css.load_from_data(
         "button.favorite-star,         button.favorite-star:checked {             background-color: transparent;             box-shadow: none;         }         button.favorite-star:hover,         button.favorite-star:checked:hover {             background-color: alpha(currentColor, 0.08);             box-shadow: none;         }",
@@ -476,7 +432,8 @@ fn create_favorite_column(column_view: &ColumnView) {
     let column = ColumnViewColumn::new(Some("Favorite"), Some(factory));
     column.set_fixed_width(62);
     let settings = load_settings();
-    column.set_visible(settings.enable_favorites && settings.show_favorites_column);
+    let allowed = kind != PackageListKind::Install;
+    column.set_visible(allowed && settings.enable_favorites && settings.show_favorites_column);
     column_view.append_column(&column);
 }
 
@@ -520,7 +477,12 @@ fn create_repository_column(column_view: &ColumnView) {
     column_view.append_column(&repository_column);
 }
 
-fn create_upgrade_column(column_view: &ColumnView, store: &ListStore, statusbar: &Label, noun: &str) {
+fn create_upgrade_column(
+    column_view: &ColumnView,
+    store: &ListStore,
+    statusbar: &Label,
+    noun: &str,
+) {
     let upgrade_factory = gtk4::SignalListItemFactory::new();
     let shift_held: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
     let last_anchor: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(None));
@@ -710,7 +672,7 @@ fn apply_favorite_range(
     }
 }
 
-fn create_name_column(column_view: &ColumnView, installed: bool) {
+fn create_name_column(column_view: &ColumnView, kind: PackageListKind) {
     let name_factory = gtk4::SignalListItemFactory::new();
     let column_view_for_gesture = column_view.clone();
     name_factory.connect_setup(move |_factory, item| {
@@ -755,7 +717,7 @@ fn create_name_column(column_view: &ColumnView, installed: bool) {
                 &pkg,
                 x,
                 y,
-                installed,
+                kind,
             );
         });
         vbox.add_controller(gesture);
@@ -780,7 +742,7 @@ fn create_name_column(column_view: &ColumnView, installed: bool) {
         let updated_label = name_label.next_sibling().and_downcast::<Label>().unwrap();
         let desc_label = name_row.next_sibling().and_downcast::<Label>().unwrap();
 
-        name_label.set_markup(&name_markup(&data));
+        name_label.set_markup(&name_markup(&data, kind));
         desc_label.set_text(&data.description);
 
         let mut tooltip_parts: Vec<String> = data.security_issues.clone();
@@ -910,10 +872,22 @@ fn create_size_column(column_view: &ColumnView) {
     column_view.append_column(&size_column);
 }
 
-fn name_markup(data: &PackageUpdate) -> String {
+fn name_markup(data: &PackageUpdate, kind: PackageListKind) -> String {
     let dark = prefers_dark();
     let mut markup = glib::markup_escape_text(&data.name).to_string();
 
+    if kind == PackageListKind::Install && !data.current_version.is_empty() {
+        markup.push_str(&badge(
+            "installed",
+            if dark { "#5adc82" } else { "#2a9d4a" },
+        ));
+    }
+    if data.is_repo_switch {
+        markup.push_str(&badge(
+            "repo switch",
+            if dark { "#62a0ea" } else { "#1c71d8" },
+        ));
+    }
     if is_recently_created(data.first_submitted) {
         markup.push_str(&badge("new", if dark { "#ff6b6b" } else { "#e01b24" }));
     }
@@ -962,8 +936,4 @@ fn name_markup(data: &PackageUpdate) -> String {
 fn badge(text: &str, color: &str) -> String {
     let safe = glib::markup_escape_text(text);
     return format!(" <span foreground=\"{}\">[{}]</span>", color, safe);
-}
-
-fn plural(n: i64) -> &'static str {
-    return if n == 1 { "" } else { "s" };
 }

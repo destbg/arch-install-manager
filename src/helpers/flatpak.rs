@@ -132,6 +132,7 @@ pub fn get_flatpak_updates() -> Result<Vec<PackageUpdate>> {
                 aur_scan_findings: Vec::new(),
                 flatpak_installation: Some(installation),
                 appimage_path: None,
+                is_repo_switch: false,
             });
         }
     }

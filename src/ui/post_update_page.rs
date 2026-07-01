@@ -324,7 +324,7 @@ pub fn set_services_section(page: &PostUpdatePage, services: Vec<String>) {
 
 pub fn run_post_update_command(window: &ApplicationWindow, command: &str) {
     let window_for_refresh = window.clone();
-    run_command_in_dialog(window.upcast_ref::<gtk4::Window>(), command, move || {
+    run_command_in_dialog(window, command, false, move || {
         refresh_post_update(&window_for_refresh);
     });
 }
@@ -515,7 +515,7 @@ pub fn set_resolutions_section(
     let section = build_section_box(&title);
 
     let caption = Label::new(Some(
-        "These packages can be replaced by another one, or moved between repositories. Tick the ones you want to apply.",
+        "These packages can be replaced by another one or moved between repositories. Tick the ones you want to apply.",
     ));
     caption.add_css_class("dim-label");
     caption.set_xalign(0.0);
@@ -605,7 +605,7 @@ pub fn set_resolutions_section(
             return;
         }
 
-        let command = format!("daim install {}", quoted.join(" "));
+        let command = format!("daim install --skip-review --reinstall {}", quoted.join(" "));
         run_post_update_command(&window_clone, &command);
     });
 

@@ -211,6 +211,7 @@ fn new_aur_update(name: &str, current_version: &str, new_version: &str) -> Packa
         aur_scan_findings: Vec::new(),
         flatpak_installation: None,
         appimage_path: None,
+        is_repo_switch: false,
     };
 }
 

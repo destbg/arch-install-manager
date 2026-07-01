@@ -7,8 +7,8 @@ use arch_install_manager::ipc::protocol::{MirrorTool, Op, Response};
 fn main() {
     if unsafe { libc::geteuid() } == 0 {
         eprintln!(
-            "daim: refusing to run as root. Run it as your normal user; daim asks for\n      \
-             elevation with sudo only when it needs it, and builds AUR packages as you."
+            "daim: refusing to run as root. Run it as your normal user. daim asks for admin\n      \
+             rights only when it needs them. It builds AUR packages as you."
         );
         exit(1);
     }
@@ -21,7 +21,20 @@ fn main() {
     }
 
     match args[0].as_str() {
-        "install" | "i" => exit(engine::install(&args[1..])),
+        "upgrade" | "u" => exit(engine::upgrade()),
+        "install" | "i" => {
+            let mut skip_review = false;
+            let mut reinstall = false;
+            let mut pkgs = Vec::new();
+            for a in &args[1..] {
+                match a.as_str() {
+                    "--skip-review" => skip_review = true,
+                    "--reinstall" => reinstall = true,
+                    other => pkgs.push(other.to_string()),
+                }
+            }
+            exit(engine::install(&pkgs, skip_review, reinstall));
+        }
         "search" | "s" | "query" | "q" => {
             let mut select = true;
             let mut terms = Vec::new();
@@ -82,7 +95,6 @@ fn parse(args: &[String]) -> Result<Op, String> {
     let rest = &args[1..];
     let op = match cmd {
         "sync" | "sy" => Op::SyncDb,
-        "upgrade" | "u" => Op::SysUpgrade,
         "install-file" | "if" => Op::InstallFiles {
             paths: rest.to_vec(),
             as_deps: false,

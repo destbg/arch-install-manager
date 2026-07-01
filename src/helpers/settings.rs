@@ -94,6 +94,7 @@ fn default_settings() -> AppSettings {
         install_search_official: true,
         install_search_aur: true,
         install_search_flatpak: false,
+        always_show_pkgbuild: false,
     };
 }
 

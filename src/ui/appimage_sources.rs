@@ -19,7 +19,7 @@ pub fn build_appimage_sources_section(parent: &ApplicationWindow) -> GtkBox {
     let container = GtkBox::new(Orientation::Vertical, 8);
 
     let actions = GtkBox::new(Orientation::Horizontal, 8);
-    let add_btn = Button::with_label("Add AppImage…");
+    let add_btn = Button::with_label("Add AppImage...");
     actions.append(&add_btn);
     container.append(&actions);
 

@@ -43,7 +43,7 @@ pub fn show_pkgbuild_review_dialog(parent: &Window, package: &str) {
     });
 }
 
-fn build_review_view(review: &PkgbuildReview) -> GtkBox {
+pub(crate) fn build_review_view(review: &PkgbuildReview) -> GtkBox {
     let container = GtkBox::new(Orientation::Vertical, 0);
     container.set_vexpand(true);
     container.set_hexpand(true);
@@ -64,9 +64,6 @@ fn build_review_view(review: &PkgbuildReview) -> GtkBox {
     }
 
     if let Some(pkgbuild) = &review.pkgbuild {
-        container.append(&header_label(
-            "No local copy was found to compare against. Showing the latest PKGBUILD from the AUR.",
-        ));
         let buffer = build_buffer(pkgbuild, shell_language().as_ref());
         container.append(&wrap_in_scroll(
             &build_source_view(&buffer, false),

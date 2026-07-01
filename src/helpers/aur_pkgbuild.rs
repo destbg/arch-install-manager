@@ -42,6 +42,7 @@ pub fn find_clone_dir(package: &str) -> Option<PathBuf> {
     let cache = PathBuf::from(user_home()?).join(".cache");
 
     let candidates = [
+        cache.join("daim").join("aur").join(package),
         cache.join("paru").join("clone").join(package),
         cache.join("paru").join(package),
         cache.join("yay").join(package),

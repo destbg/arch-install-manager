@@ -1,7 +1,9 @@
 pub mod app_settings;
 pub mod appimage_entry;
 pub mod appimage_update_source;
+pub mod aur_build;
 pub mod aur_info;
+pub mod aur_plan;
 pub mod aur_scan_finding;
 pub mod cache_candidates;
 pub mod cached_version;
@@ -22,6 +24,7 @@ pub mod news_state;
 pub mod open_vulnerability;
 pub mod paccache_dry_result;
 pub mod package_info;
+pub mod package_list_kind;
 pub mod package_object;
 pub mod package_source;
 pub mod package_update;

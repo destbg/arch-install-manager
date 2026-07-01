@@ -6,7 +6,16 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::models::package_source::PackageSource;
+use crate::models::package_update::PackageUpdate;
 use crate::models::repo_switch::{RepoSwitch, SwitchKind};
+
+pub fn detect_switch_updates() -> Vec<PackageUpdate> {
+    let switches = match detect_repo_switches() {
+        Ok(switches) => switches,
+        Err(_) => return Vec::new(),
+    };
+    return switches.into_iter().map(switch_to_update).collect();
+}
 
 pub fn detect_repo_switches() -> Result<Vec<RepoSwitch>> {
     let pacman_conf = pacmanconf::Config::new().context("failed to read pacman.conf")?;
@@ -126,6 +135,30 @@ pub fn detect_repo_switches() -> Result<Vec<RepoSwitch>> {
     }
 
     return Ok(switches);
+}
+
+fn switch_to_update(switch: RepoSwitch) -> PackageUpdate {
+    let description = match switch.kind {
+        SwitchKind::RepoChange => format!(
+            "Installed from the AUR. It is now in the {} repository.",
+            switch.target_repo
+        ),
+        SwitchKind::Replace => format!(
+            "Replaces {} ({}).",
+            switch.installed_name, switch.installed_repo
+        ),
+    };
+    return PackageUpdate {
+        source: PackageSource::Official,
+        repository: switch.target_repo,
+        selected: false,
+        name: switch.target_name,
+        description,
+        current_version: switch.installed_version,
+        new_version: switch.target_version,
+        is_repo_switch: true,
+        ..Default::default()
+    };
 }
 
 fn is_ignored(ignore_pkg: &[String], name: &str) -> bool {

@@ -9,26 +9,27 @@ use crate::helpers::settings::load_settings;
 use crate::helpers::snapper::{
     build_snapper_snapshot_command, is_snap_pac_installed, is_snapper_installed,
 };
-use crate::helpers::terminal::spawn_terminal;
+use crate::ipc::client::attach_session;
 use crate::log_info;
 use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
 use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog};
 use crate::ui::history_dialog::show_history_dialog;
-use crate::ipc::client::attach_session;
+use crate::ui::install_review::review_then_install;
 use crate::ui::main_window::{
     find_favorites_column, find_package_store, load_packages, paned_column_view, update_layout,
 };
 use crate::ui::package_list::{save_unselected_from_store, update_statusbar};
 use crate::ui::settings_dialog::show_settings_dialog;
+use crate::ui::terminal_page::run_update_install_dialog;
 use crate::ui::vulnerabilities_dialog::show_vulnerabilities_dialog;
 use gio::ListStore;
 use glib::clone;
 use gtk4::prelude::*;
 use gtk4::{
-    ApplicationWindow, Box as GtkBox, Button, FilterListModel, Frame, Image, Label,
-    Orientation, Paned, Separator, SingleSelection, SortListModel, Stack,
+    ApplicationWindow, Box as GtkBox, Button, FilterListModel, Image, Label, Orientation, Paned,
+    Separator, SingleSelection, SortListModel,
 };
 use shlex::try_quote as quote;
 use std::collections::HashMap;
@@ -388,7 +389,7 @@ fn disk_space_warning(store: &ListStore) -> Option<String> {
     let free = glib::format_size(available as u64);
     if needed > 0 {
         return Some(format!(
-            "Low disk space. Only {} is free on the system partition, and these updates need about {} more. The install may run out of space and fail.",
+            "Low disk space. Only {} is free on the system partition. These updates need about {} more. The install may run out of space and fail.",
             free,
             glib::format_size(needed as u64)
         ));
@@ -437,10 +438,33 @@ fn run_install(
     create_snapper: bool,
 ) {
     let _ = attach_session();
-    if let Err(e) = install_selected_packages_ui(store, window, create_snapshot, create_snapper) {
-        log_info!("install failed: {}", e);
-        eprintln!("Failed to install packages: {}", e);
+    let aur_names = collect_aur_names(store);
+    let store = store.clone();
+    let window_for_proceed = window.clone();
+    review_then_install(window, aur_names, move || {
+        if let Err(e) = install_selected_packages_ui(
+            &store,
+            &window_for_proceed,
+            create_snapshot,
+            create_snapper,
+        ) {
+            log_info!("install failed: {}", e);
+            eprintln!("Failed to install packages: {}", e);
+        }
+    });
+}
+
+fn collect_aur_names(store: &ListStore) -> Vec<String> {
+    let mut names = Vec::new();
+    for i in 0..store.n_items() {
+        if let Some(item) = store.item(i).and_downcast::<PackageUpdateObject>() {
+            let data = item.data();
+            if data.selected && data.source == PackageSource::Aur {
+                names.push(data.name);
+            }
+        }
     }
+    return names;
 }
 
 fn install_selected_packages_ui(
@@ -528,37 +552,26 @@ fn create_button_content(icon_name: &str, label_text: &str) -> GtkBox {
     return button_box;
 }
 
-fn find_terminal_in_box(container: &GtkBox) -> Option<Frame> {
-    let mut child = container.first_child();
-    while let Some(widget) = child {
-        if let Some(frame) = widget.downcast_ref::<Frame>() {
-            if frame.label().is_some_and(|label| label == "Terminal") {
-                return Some(frame.clone());
-            }
-        }
-
-        if let Some(child_box) = widget.downcast_ref::<GtkBox>() {
-            if let Some(found) = find_terminal_in_box(child_box) {
-                return Some(found);
-            }
-        }
-        child = widget.next_sibling();
-    }
-    return None;
-}
-
-fn start_installation_in_terminal(
-    terminal: &vte4::Terminal,
+fn build_install_command(
     official_packages: Vec<PackageUpdate>,
     aur_packages: Vec<PackageUpdate>,
     flatpak_packages: Vec<PackageUpdate>,
     appimage_packages: Vec<PackageUpdate>,
     create_timeshift: bool,
     create_snapper: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let settings = load_settings();
 
-    let pacman_cmd = if !official_packages.is_empty() {
+    let regular: Vec<&PackageUpdate> = official_packages
+        .iter()
+        .filter(|p| !p.is_repo_switch)
+        .collect();
+    let switches: Vec<&PackageUpdate> = official_packages
+        .iter()
+        .filter(|p| p.is_repo_switch)
+        .collect();
+
+    let pacman_cmd = if !regular.is_empty() || !switches.is_empty() {
         let mut parts: Vec<String> = Vec::new();
 
         let package_groups: Vec<Vec<String>> =
@@ -576,7 +589,7 @@ fn start_installation_in_terminal(
                 let mut separated_groups: HashMap<String, Vec<String>> = HashMap::new();
                 let mut combined_group: Vec<String> = Vec::new();
 
-                for pkg in &official_packages {
+                for pkg in &regular {
                     if let Some(group_id) = repo_to_group_id.get(&pkg.repository) {
                         if settings.separate_repositories.contains(group_id) {
                             separated_groups
@@ -596,8 +609,10 @@ fn start_installation_in_terminal(
                     groups.push(combined_group);
                 }
                 groups.into_iter().filter(|g| !g.is_empty()).collect()
+            } else if regular.is_empty() {
+                Vec::new()
             } else {
-                vec![official_packages.iter().map(|p| p.name.clone()).collect()]
+                vec![regular.iter().map(|p| p.name.clone()).collect()]
             };
 
         for mut pkgs in package_groups {
@@ -607,7 +622,22 @@ fn start_installation_in_terminal(
                 .collect::<Result<Vec<String>, _>>()?
                 .join(" ");
 
-            parts.push(format!("daim install {}", pkgs_quoted));
+            parts.push(auto_confirm_install(&format!(
+                "daim install --skip-review {}",
+                pkgs_quoted
+            )));
+        }
+
+        if !switches.is_empty() {
+            let names = switches
+                .iter()
+                .map(|p| quote(&p.name).map(|cow| cow.into_owned()))
+                .collect::<Result<Vec<String>, _>>()?
+                .join(" ");
+            parts.push(auto_confirm_install(&format!(
+                "daim install --skip-review --reinstall {}",
+                names
+            )));
         }
 
         if parts.is_empty() {
@@ -622,10 +652,13 @@ fn start_installation_in_terminal(
     let aur_cmd = if !aur_packages.is_empty() {
         let names = aur_packages
             .iter()
-            .map(|p| quote(&p.name).map(|cow| cow.into_owned()))
+            .map(|p| quote(&format!("aur/{}", p.name)).map(|cow| cow.into_owned()))
             .collect::<Result<Vec<String>, _>>()?
             .join(" ");
-        Some(format!("daim install {}", names))
+        Some(auto_confirm_install(&format!(
+            "daim install --skip-review {}",
+            names
+        )))
     } else {
         None
     };
@@ -674,15 +707,37 @@ fn start_installation_in_terminal(
     .collect();
 
     if parts.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let joined = parts.join(" && ");
+    return Ok(Some(joined));
+}
 
-    log_info!("spawning install terminal command: {}", joined);
-    spawn_terminal(terminal, vec!["bash", "-lc", &joined]);
-
-    return Ok(());
+fn auto_confirm_install(command: &str) -> String {
+    return format!(
+        r#"(expect -c '
+set timeout -1
+spawn {command}
+expect {{
+    -re {{Proceed with installation\? \[Y/n\]}} {{
+        send -- "y\r"
+        exp_continue
+    }}
+    eof
+}}
+catch wait result
+set exit_code [lindex $result 3]
+if {{$exit_code eq ""}} {{
+    set exit_code 1
+}}
+exit $exit_code
+'
+expect_status=$?
+while [ -e /var/lib/pacman/db.lck ]; do sleep 0.2; done
+exit $expect_status)"#,
+        command = command
+    );
 }
 
 fn navigate_to_terminal_and_install(
@@ -694,33 +749,19 @@ fn navigate_to_terminal_and_install(
     create_timeshift: bool,
     create_snapper: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(main_box) = window.child().and_downcast::<GtkBox>() else {
-        return Err("Could not find main box".into());
-    };
-    let Some(stack) = main_box.first_child().and_downcast::<Stack>() else {
-        return Err("Could not find stack".into());
-    };
-    let Some(terminal_box) = stack.child_by_name("terminal").and_downcast::<GtkBox>() else {
-        return Err("Could not find terminal box".into());
-    };
-    let Some(terminal_frame) = find_terminal_in_box(&terminal_box) else {
-        return Err("Could not find terminal frame".into());
-    };
-    let Some(terminal) = terminal_frame.child().and_downcast::<vte4::Terminal>() else {
-        return Err("Could not find terminal widget".into());
-    };
-
-    stack.set_visible_child_name("terminal");
-
-    start_installation_in_terminal(
-        &terminal,
+    let Some(command) = build_install_command(
         official_packages,
         aur_packages,
         flatpak_packages,
         appimage_packages,
         create_timeshift,
         create_snapper,
-    )?;
+    )?
+    else {
+        return Ok(());
+    };
+
+    run_update_install_dialog(window, &command);
 
     return Ok(());
 }

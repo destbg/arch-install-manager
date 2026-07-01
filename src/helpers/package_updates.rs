@@ -148,6 +148,7 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
                 aur_scan_findings: Vec::new(),
                 flatpak_installation: None,
                 appimage_path: None,
+                is_repo_switch: false,
             });
         }
 
