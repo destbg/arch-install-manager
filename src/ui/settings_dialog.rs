@@ -1,6 +1,6 @@
 use gio::ListStore;
 use gtk4::{ApplicationWindow, prelude::*};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::{
@@ -1109,6 +1109,8 @@ fn create_favorites_tab(
     let checkboxes: Rc<RefCell<Vec<(String, gtk4::CheckButton)>>> =
         Rc::new(RefCell::new(Vec::new()));
 
+    let suppress_save = Rc::new(Cell::new(false));
+
     for pkg_name in &sorted_packages {
         let is_fav = settings.is_favorite(pkg_name);
 
@@ -1143,12 +1145,16 @@ fn create_favorites_tab(
 
         let name_for_save = pkg_name.clone();
         let label_for_save = label.clone();
+        let suppress_for_toggle = suppress_save.clone();
         check.connect_toggled(move |cb| {
             let active = cb.is_active();
             if active {
                 label_for_save.add_css_class("heading");
             } else {
                 label_for_save.remove_css_class("heading");
+            }
+            if suppress_for_toggle.get() {
+                return;
             }
             let mut s = load_settings();
             s.set_favorite(&name_for_save, active);
@@ -1205,14 +1211,23 @@ fn create_favorites_tab(
         "Tick every installed package that is a desktop application",
     ));
     let checkboxes_for_apps = checkboxes.clone();
+    let suppress_for_apps = suppress_save.clone();
     add_apps_btn.connect_clicked(move |_| {
         let desktop_apps = get_desktop_app_packages();
         if desktop_apps.is_empty() {
             return;
         }
+        suppress_for_apps.set(true);
         for (name, cb) in checkboxes_for_apps.borrow().iter() {
             if desktop_apps.contains(name) {
                 cb.set_active(true);
+            }
+        }
+        suppress_for_apps.set(false);
+        save_favorites_from_checkboxes(&checkboxes_for_apps.borrow());
+        for (name, cb) in checkboxes_for_apps.borrow().iter() {
+            if desktop_apps.contains(name) {
+                refresh_favorite_button(name, cb.is_active());
             }
         }
     });
@@ -1221,11 +1236,16 @@ fn create_favorites_tab(
     let bulk_btn = gtk4::Button::with_label("Clear all");
     update_bulk_button(&bulk_btn, settings.favorites_exclusion_mode);
     let checkboxes_for_bulk = checkboxes.clone();
+    let suppress_for_bulk = suppress_save.clone();
     bulk_btn.connect_clicked(move |btn| {
         let target = btn.label().map(|l| l == "Mark all").unwrap_or(false);
+        suppress_for_bulk.set(true);
         for (_, cb) in checkboxes_for_bulk.borrow().iter() {
             cb.set_active(target);
         }
+        suppress_for_bulk.set(false);
+        save_favorites_from_checkboxes(&checkboxes_for_bulk.borrow());
+        refresh_all_favorite_buttons(target);
     });
     bottom_row.append(&bulk_btn);
 
@@ -1235,6 +1255,7 @@ fn create_favorites_tab(
     let parent_for_mode = parent.clone();
     let checkboxes_for_mode = checkboxes.clone();
     let bulk_for_mode = bulk_btn.clone();
+    let suppress_for_mode = suppress_save.clone();
     mode_btn.connect_clicked(move |btn| {
         let switching_to_exclusion = !load_settings().favorites_exclusion_mode;
         let (title, message) = if switching_to_exclusion {
@@ -1251,6 +1272,7 @@ fn create_favorites_tab(
         let btn_for_response = btn.clone();
         let checkboxes_for_response = checkboxes_for_mode.clone();
         let bulk_for_response = bulk_for_mode.clone();
+        let suppress_for_response = suppress_for_mode.clone();
         show_confirm_dialog(&parent_for_mode, title, message, "Switch", move |accepted| {
             if !accepted {
                 return;
@@ -1270,14 +1292,37 @@ fn create_favorites_tab(
             });
             update_mode_button_tooltip(&btn_for_response, switching_to_exclusion);
             update_bulk_button(&bulk_for_response, switching_to_exclusion);
+            suppress_for_response.set(true);
             for (_, cb) in checkboxes_for_response.borrow().iter() {
                 cb.set_active(switching_to_exclusion);
             }
+            suppress_for_response.set(false);
             kick_tray();
         });
     });
 
     return (enable_check, show_col_check, mode_btn);
+}
+
+fn save_favorites_from_checkboxes(checkboxes: &[(String, gtk4::CheckButton)]) {
+    let mut s = load_settings();
+    let exclusion = s.favorites_exclusion_mode;
+    s.favorite_packages = checkboxes
+        .iter()
+        .filter(|(_, cb)| {
+            if exclusion {
+                !cb.is_active()
+            } else {
+                cb.is_active()
+            }
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    if let Err(e) = save_settings(&s) {
+        eprintln!("Failed to save favorite packages: {}", e);
+        return;
+    }
+    kick_tray();
 }
 
 fn update_bulk_button(button: &gtk4::Button, exclusion_mode: bool) {
