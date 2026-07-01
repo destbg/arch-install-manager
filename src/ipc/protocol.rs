@@ -37,6 +37,10 @@ pub enum Op {
         paths: Vec<String>,
         as_deps: bool,
     },
+    AurBuildInstall {
+        name: String,
+        as_deps: bool,
+    },
     RemoveMakeDeps {
         targets: Vec<String>,
     },
@@ -76,6 +80,7 @@ impl Op {
             Op::SysUpgrade
                 | Op::Install { .. }
                 | Op::InstallFiles { .. }
+                | Op::AurBuildInstall { .. }
                 | Op::Remove { .. }
                 | Op::RefreshMirrors { .. }
                 | Op::SnapshotSnapper { .. }

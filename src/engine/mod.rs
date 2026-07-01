@@ -372,6 +372,9 @@ fn resolve_aur(
     visited: &mut HashSet<String>,
     plan: &mut AurPlan,
 ) -> Result<(), String> {
+    if !is_valid_aur_name(name) {
+        return Err(format!("invalid package name: {name}"));
+    }
     if !visited.insert(name.to_string()) {
         return Ok(());
     }
@@ -413,15 +416,8 @@ fn pending_repo_deps(deps: &[String]) -> Vec<String> {
 }
 
 fn build_and_install(build: &AurBuild) -> Result<(), String> {
-    makepkg(&build.dir)?;
-
-    let files = packagelist(&build.dir)?;
-    if files.is_empty() {
-        return Err(format!("no package files were produced for {}", build.name));
-    }
-
-    let resp = client::call_with_tty(Op::InstallFiles {
-        paths: files,
+    let resp = client::call_with_tty(Op::AurBuildInstall {
+        name: build.name.clone(),
         as_deps: !build.explicit,
     })
     .map_err(|e| e.to_string())?;
@@ -526,12 +522,8 @@ fn current_orphans() -> HashSet<String> {
 }
 
 fn aur_cache_dir() -> PathBuf {
-    let base = std::env::var("XDG_CACHE_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"));
-    return base.join("daim").join("aur");
+    let home = std::env::var("HOME").unwrap_or_default();
+    return PathBuf::from(home).join(".cache").join("daim").join("aur");
 }
 
 fn fetch_aur(name: &str) -> Result<(PathBuf, bool, Option<String>), String> {
@@ -592,31 +584,6 @@ fn read_pkgbuild(dir: &Path) -> Option<String> {
     return std::fs::read_to_string(dir.join("PKGBUILD")).ok();
 }
 
-fn makepkg(dir: &Path) -> Result<(), String> {
-    run_inherit(
-        Command::new("makepkg")
-            .current_dir(dir)
-            .args(["-f", "--noconfirm"]),
-    )?;
-    return Ok(());
-}
-
-fn packagelist(dir: &Path) -> Result<Vec<String>, String> {
-    let output = Command::new("makepkg")
-        .current_dir(dir)
-        .arg("--packagelist")
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err("makepkg --packagelist failed".to_string());
-    }
-    return Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect());
-}
-
 fn parse_srcinfo_deps(dir: &Path) -> Vec<String> {
     let Ok(content) = std::fs::read_to_string(dir.join(".SRCINFO")) else {
         return Vec::new();
@@ -636,6 +603,18 @@ fn parse_srcinfo_deps(dir: &Path) -> Vec<String> {
         }
     }
     return deps;
+}
+
+fn is_valid_aur_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 256 {
+        return false;
+    }
+    if name.starts_with('-') || name.starts_with('.') {
+        return false;
+    }
+    return name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '.' | '_' | '+' | '-'));
 }
 
 fn dependency_base_name(dependency: &str) -> String {

@@ -6,7 +6,7 @@ pkgdesc="A Linux Mint inspired GTK4-based install and update manager for Arch Li
 arch=('x86_64')
 url="https://github.com/destbg/arch-install-manager"
 license=('MIT')
-depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
+depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'systemd' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
 provides=('arch-install-manager')
 conflicts=('arch-install-manager')
 makedepends=('cargo' 'git')
@@ -53,6 +53,9 @@ package() {
 
 	install -Dm644 "res/polkit/49-daim-check.rules" \
 		"$pkgdir/usr/share/polkit-1/rules.d/49-daim-check.rules"
+
+	install -Dm644 "res/sysusers/daim-build.conf" \
+		"$pkgdir/usr/lib/sysusers.d/daim-build.conf"
 
 	install -Dm644 "res/systemd/daim-check.service" \
 		"$pkgdir/usr/lib/systemd/system/daim-check.service"

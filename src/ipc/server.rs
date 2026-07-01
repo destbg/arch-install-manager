@@ -4,18 +4,24 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use nix::sys::socket::getsockopt;
 use nix::sys::socket::sockopt::PeerCredentials;
-use nix::unistd::{Gid, Uid, chown};
+use nix::unistd::{Gid, Uid, User, chown, setgid, setgroups, setuid};
 
 use crate::helpers::database_lock::remove_database_lock;
 use crate::helpers::pacman_ignore::{add_to_ignore_pkg, remove_from_ignore_pkg};
 use crate::ipc::protocol::{MirrorTool, Op, Request, Response, recv_request, write_response};
+
+const IDLE_TIMEOUT: Duration = Duration::from_secs(1800);
+const BUILD_USER: &str = "daim-build";
+const AUR_CLONE_SUBDIR: &str = ".cache/daim/aur";
+const BUILD_ROOT: &str = "/var/lib/daim/build";
+const BUILD_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
 
 pub struct Config {
     pub uid: u32,
@@ -23,11 +29,9 @@ pub struct Config {
     pub socket_path: PathBuf,
 }
 
-static ATTACHED: AtomicBool = AtomicBool::new(false);
-
 static LAST_ACTIVITY: Mutex<Option<Instant>> = Mutex::new(None);
 
-const IDLE_TIMEOUT: Duration = Duration::from_secs(900);
+static ACTIVE_OPS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn run(config: Config) -> io::Result<()> {
     if let Some(dir) = config.socket_path.parent() {
@@ -73,8 +77,9 @@ fn touch_activity() {
 fn spawn_idle_watchdog(socket_path: PathBuf) {
     std::thread::spawn(move || {
         loop {
-            std::thread::sleep(Duration::from_secs(60));
-            if ATTACHED.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_secs(30));
+            if ACTIVE_OPS.load(Ordering::SeqCst) > 0 {
+                touch_activity();
                 continue;
             }
             let idle = LAST_ACTIVITY
@@ -131,14 +136,16 @@ fn handle_connection(mut stream: UnixStream, authorized_uid: u32) {
             std::process::exit(0);
         }
         _ => {
-            let resp = execute(&received.req, received.fds);
+            ACTIVE_OPS.fetch_add(1, Ordering::SeqCst);
+            let resp = execute(&received.req, received.fds, authorized_uid);
+            ACTIVE_OPS.fetch_sub(1, Ordering::SeqCst);
+            touch_activity();
             let _ = write_response(&mut stream, &resp);
         }
     }
 }
 
 fn hold_attach(mut stream: UnixStream) {
-    ATTACHED.store(true, Ordering::SeqCst);
     let mut buf = [0u8; 64];
     loop {
         match stream.read(&mut buf) {
@@ -149,7 +156,7 @@ fn hold_attach(mut stream: UnixStream) {
     std::process::exit(0);
 }
 
-fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
+fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
     match &req.op {
         Op::SyncDb => run_capture("pacman", &["-Sy"]),
         Op::SysUpgrade => run_tty_or_err("pacman", &["-Su"], &[], fds),
@@ -169,6 +176,7 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
             if *as_deps {
                 args.push("--asdeps");
             }
+            args.push("--");
             args.extend(targets.iter().map(|s| s.as_str()));
             run_tty_or_err("pacman", &args, &[], fds)
         }
@@ -180,14 +188,16 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
             if *as_deps {
                 args.push("--asdeps");
             }
+            args.push("--");
             args.extend(paths.iter().map(|s| s.as_str()));
             run_tty_or_err("pacman", &args, &[], fds)
         }
+        Op::AurBuildInstall { name, as_deps } => build_and_install_aur(name, *as_deps, uid, fds),
         Op::RemoveMakeDeps { targets } => {
             if let Err(e) = validate_names(targets) {
                 return Response::error(e);
             }
-            let mut args = vec!["-Rs", "--noconfirm"];
+            let mut args = vec!["-Rs", "--noconfirm", "--"];
             args.extend(targets.iter().map(|s| s.as_str()));
             run_capture("pacman", &args)
         }
@@ -206,7 +216,7 @@ fn execute(req: &Request, fds: Vec<OwnedFd>) -> Response {
             if *nosave {
                 flag.push('n');
             }
-            let mut args = vec![flag.as_str()];
+            let mut args = vec![flag.as_str(), "--"];
             args.extend(targets.iter().map(|s| s.as_str()));
             run_tty_or_err("pacman", &args, &[], fds)
         }
@@ -367,8 +377,196 @@ fn run_tty_or_err(
     }
 }
 
+fn build_and_install_aur(name: &str, as_deps: bool, uid: u32, fds: Vec<OwnedFd>) -> Response {
+    if let Err(e) = validate_name(name) {
+        return Response::error(e);
+    }
+    let tty = match into_tty(fds) {
+        Some(t) => t,
+        None => return Response::error("operation requires a terminal but none was provided"),
+    };
+    let caller = match User::from_uid(Uid::from_raw(uid)) {
+        Ok(Some(u)) => u,
+        _ => return Response::error("could not resolve the requesting user"),
+    };
+    let source_dir = caller.dir.join(AUR_CLONE_SUBDIR).join(name);
+    if !source_dir.join("PKGBUILD").is_file() {
+        return Response::error(format!("no PKGBUILD found for {name}"));
+    }
+    let builder = match User::from_name(BUILD_USER) {
+        Ok(Some(u)) => u,
+        _ => return Response::error("the daim-build user is missing, reinstall to create it"),
+    };
+
+    let build_dir = Path::new(BUILD_ROOT).join(name);
+    if let Err(e) = prepare_build_dir(&source_dir, &build_dir, &builder) {
+        let _ = std::fs::remove_dir_all(&build_dir);
+        return Response::error(e);
+    }
+
+    let result = run_build_and_install(&build_dir, &builder, as_deps, &tty);
+    let _ = std::fs::remove_dir_all(&build_dir);
+    return result;
+}
+
+fn prepare_build_dir(source_dir: &Path, build_dir: &Path, builder: &User) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(build_dir);
+    if let Some(parent) = build_dir.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let copied = Command::new("cp")
+        .arg("-a")
+        .arg("--no-preserve=ownership")
+        .arg(source_dir)
+        .arg(build_dir)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !copied.success() {
+        return Err("failed to copy the package sources".to_string());
+    }
+
+    let _ = std::fs::remove_dir_all(build_dir.join(".git"));
+
+    let spec = format!("{}:{}", builder.uid.as_raw(), builder.gid.as_raw());
+    let owned = Command::new("chown")
+        .arg("-R")
+        .arg(&spec)
+        .arg(build_dir)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !owned.success() {
+        return Err("failed to set build directory ownership".to_string());
+    }
+    return Ok(());
+}
+
+fn run_build_and_install(
+    build_dir: &Path,
+    builder: &User,
+    as_deps: bool,
+    tty: &[OwnedFd; 3],
+) -> Response {
+    let uid = builder.uid.as_raw();
+    let gid = builder.gid.as_raw();
+    let home = builder.dir.to_string_lossy().to_string();
+
+    let mut makepkg = Command::new("makepkg");
+    makepkg
+        .current_dir(build_dir)
+        .args(["-f", "--noconfirm"])
+        .env("HOME", &home)
+        .env("PATH", BUILD_PATH);
+    match spawn_tty(&mut makepkg, tty, Some((uid, gid))) {
+        Ok(status) if status.success() => {}
+        Ok(_) => return Response::error("makepkg failed while building the package"),
+        Err(e) => return Response::error(format!("failed to run makepkg: {e}")),
+    }
+
+    let files = match build_package_list(build_dir, uid, gid, &home) {
+        Ok(files) if !files.is_empty() => files,
+        Ok(_) => return Response::error("no package files were produced"),
+        Err(e) => return Response::error(e),
+    };
+
+    let mut pacman = Command::new("pacman");
+    pacman.arg("-U");
+    if as_deps {
+        pacman.arg("--asdeps");
+    }
+    pacman.arg("--");
+    for file in &files {
+        pacman.arg(file);
+    }
+    match spawn_tty(&mut pacman, tty, None) {
+        Ok(status) => Response::Done {
+            exit_code: status.code().unwrap_or(-1),
+            stdout: String::new(),
+            stderr: String::new(),
+        },
+        Err(e) => Response::error(format!("failed to run pacman: {e}")),
+    }
+}
+
+fn build_package_list(
+    build_dir: &Path,
+    uid: u32,
+    gid: u32,
+    home: &str,
+) -> Result<Vec<String>, String> {
+    let mut cmd = Command::new("makepkg");
+    cmd.current_dir(build_dir)
+        .arg("--packagelist")
+        .env("HOME", home)
+        .env("PATH", BUILD_PATH);
+    unsafe {
+        cmd.pre_exec(move || {
+            drop_to_user(uid, gid)?;
+            return Ok(());
+        });
+    }
+    let output = cmd.output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("makepkg --packagelist failed".to_string());
+    }
+    return Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect());
+}
+
+fn spawn_tty(
+    cmd: &mut Command,
+    tty: &[OwnedFd; 3],
+    drop_privs: Option<(u32, u32)>,
+) -> io::Result<ExitStatus> {
+    let stdin = tty[0].try_clone()?;
+    let stdout = tty[1].try_clone()?;
+    let stderr = tty[2].try_clone()?;
+    cmd.stdin(Stdio::from(stdin))
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    unsafe {
+        cmd.pre_exec(move || {
+            if let Some((uid, gid)) = drop_privs {
+                drop_to_user(uid, gid)?;
+            }
+            libc::setsid();
+            libc::ioctl(0, libc::TIOCSCTTY as libc::c_ulong, 0);
+            return Ok(());
+        });
+    }
+    return cmd.status();
+}
+
+fn into_tty(fds: Vec<OwnedFd>) -> Option<[OwnedFd; 3]> {
+    if fds.len() != 3 {
+        return None;
+    }
+    let mut it = fds.into_iter();
+    let stdin = it.next().unwrap();
+    let stdout = it.next().unwrap();
+    let stderr = it.next().unwrap();
+    return Some([stdin, stdout, stderr]);
+}
+
+fn drop_to_user(uid: u32, gid: u32) -> io::Result<()> {
+    setgroups(&[Gid::from_raw(gid)]).map_err(nix_to_io)?;
+    setgid(Gid::from_raw(gid)).map_err(nix_to_io)?;
+    setuid(Uid::from_raw(uid)).map_err(nix_to_io)?;
+    return Ok(());
+}
+
+fn nix_to_io(e: nix::Error) -> io::Error {
+    return io::Error::from_raw_os_error(e as i32);
+}
+
 fn validate_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name.len() > 256 {
+        return Err(format!("invalid name: {name:?}"));
+    }
+    if name.starts_with('-') {
         return Err(format!("invalid name: {name:?}"));
     }
     let ok = name
@@ -395,9 +593,16 @@ fn validate_pkg_paths(paths: &[String]) -> Result<(), String> {
         return Err("no package files supplied".into());
     }
     for p in paths {
+        if p.starts_with('-') {
+            return Err(format!("invalid package path: {p}"));
+        }
         let path = Path::new(p);
-        if !path.is_file() {
-            return Err(format!("not a file: {p}"));
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(_) => return Err(format!("not a file: {p}")),
+        };
+        if !metadata.file_type().is_file() {
+            return Err(format!("not a regular file: {p}"));
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if !name.contains(".pkg.tar") {

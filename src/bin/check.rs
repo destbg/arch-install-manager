@@ -1,6 +1,11 @@
+use std::env;
+use std::fs;
+use std::os::unix::fs::symlink;
+use std::path::PathBuf;
 use std::process::Command;
 
 use chrono::Utc;
+use libc::geteuid;
 
 use arch_install_manager::helpers::aur::get_aur_updates;
 use arch_install_manager::helpers::network::is_network_metered;
@@ -92,13 +97,20 @@ fn line_starts_with_any(line: &str, names: &[String]) -> bool {
 }
 
 fn get_repo_updates() -> anyhow::Result<Vec<String>> {
-    let sync = Command::new("pacman").args(["-Sy"]).output()?;
+    let db_path = prepare_check_db()?;
+    let db_arg = db_path.to_string_lossy().to_string();
+
+    let sync = Command::new("pacman")
+        .args(["-Sy", "--dbpath", &db_arg, "--logfile", "/dev/null"])
+        .output()?;
     if !sync.status.success() {
         let stderr = String::from_utf8_lossy(&sync.stderr);
         return Err(anyhow::anyhow!("pacman -Sy failed: {}", stderr.trim()));
     }
 
-    let output = Command::new("pacman").args(["-Qu"]).output()?;
+    let output = Command::new("pacman")
+        .args(["-Qu", "--dbpath", &db_arg])
+        .output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut updates = Vec::new();
     for line in stdout.lines() {
@@ -108,4 +120,16 @@ fn get_repo_updates() -> anyhow::Result<Vec<String>> {
         }
     }
     return Ok(updates);
+}
+
+fn prepare_check_db() -> anyhow::Result<PathBuf> {
+    let uid = unsafe { geteuid() };
+    let db_path = env::temp_dir().join(format!("daim-checkup-db-{}", uid));
+    fs::create_dir_all(db_path.join("sync"))?;
+
+    let local_link = db_path.join("local");
+    if !local_link.exists() {
+        symlink("/var/lib/pacman/local", &local_link)?;
+    }
+    return Ok(db_path);
 }

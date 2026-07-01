@@ -43,6 +43,7 @@ use gtk4::{
     FilterListModel, HeaderBar, Orientation, Paned, ScrolledWindow, SearchBar, SearchEntry,
     Separator, SingleSelection, SortListModel, Stack, StackSwitcher, ToggleButton,
 };
+use shlex::try_quote;
 use std::cell::RefCell;
 
 thread_local! {
@@ -1105,7 +1106,14 @@ fn build_install_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
         }
         let aur_names = collect_selected_aur_names(&store_for_install);
         let _ = attach_session();
-        let command = format!("daim install --skip-review {}", targets.join(" "));
+        let quoted: Vec<String> = targets
+            .iter()
+            .filter_map(|t| try_quote(t).ok().map(|c| c.into_owned()))
+            .collect();
+        if quoted.len() != targets.len() {
+            return;
+        }
+        let command = format!("daim install --skip-review {}", quoted.join(" "));
         let window = window_for_install.clone();
         let refresh = run_search_for_install.clone();
         review_then_install(&window_for_install, aur_names, move || {
@@ -1295,7 +1303,13 @@ fn build_manage_tab(stack: &Stack, window: &ApplicationWindow) -> GtkBox {
         window,
         &store,
         &populate,
-        std::rc::Rc::new(|names: &[String]| format!("daim remove {}", names.join(" "))),
+        std::rc::Rc::new(|names: &[String]| {
+            let quoted: Vec<String> = names
+                .iter()
+                .filter_map(|n| try_quote(n).ok().map(|c| c.into_owned()))
+                .collect();
+            return format!("daim remove {}", quoted.join(" "));
+        }),
     );
 
     let window_for_orphans = window.clone();

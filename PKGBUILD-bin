@@ -5,7 +5,7 @@ pkgdesc="A Linux Mint inspired GTK4-based install and update manager for Arch Li
 arch=('x86_64')
 url="https://github.com/destbg/arch-install-manager"
 license=('MIT')
-depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
+depends=('gtk4' 'vte4' 'gtksourceview5' 'polkit' 'systemd' 'pacman' 'pacman-contrib' 'curl' 'git' 'base-devel')
 provides=('arch-install-manager')
 conflicts=('arch-install-manager')
 optdepends=('flatpak: Flatpak package support'
@@ -36,6 +36,9 @@ package() {
     "$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
   install -Dm644 "${srcdir_repo}/res/polkit/49-daim-check.rules" \
     "$pkgdir/usr/share/polkit-1/rules.d/49-daim-check.rules"
+
+  install -Dm644 "${srcdir_repo}/res/sysusers/daim-build.conf" \
+    "$pkgdir/usr/lib/sysusers.d/daim-build.conf"
 
   for unit in daim-check.service daim-check.timer; do
     if [[ -f "${srcdir_repo}/res/systemd/${unit}" ]]; then

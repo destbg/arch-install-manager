@@ -4,6 +4,8 @@ use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, Orientation, Popover, PositionType, Widget,
 };
 
+use shlex::try_quote;
+
 use crate::helpers::elevated::open_url_as_user;
 use crate::helpers::pacman_ignore::{
     add_to_ignore_pkg, is_in_managed_ignore_pkg, remove_from_ignore_pkg,
@@ -69,7 +71,10 @@ pub fn show_package_context_menu(
                 } else {
                     name.clone()
                 };
-                let command = format!("daim install --skip-review {}", target);
+                let Ok(quoted_target) = try_quote(&target) else {
+                    return;
+                };
+                let command = format!("daim install --skip-review {}", quoted_target);
                 let aur_names = if is_aur {
                     vec![name.clone()]
                 } else {
@@ -88,7 +93,10 @@ pub fn show_package_context_menu(
             let window = window.clone();
             move || {
                 let _ = attach_session();
-                let command = format!("daim remove {}", name);
+                let Ok(quoted) = try_quote(name.as_str()) else {
+                    return;
+                };
+                let command = format!("daim remove {}", quoted);
                 run_command_in_dialog(&window, &command, true, || {});
             }
         });
