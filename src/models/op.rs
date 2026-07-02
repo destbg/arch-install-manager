@@ -63,7 +63,6 @@ impl Op {
                 | Op::AurBuildInstall { .. }
                 | Op::Remove { .. }
                 | Op::RefreshMirrors { .. }
-                | Op::SnapshotSnapper { .. }
                 | Op::RunPacdiff
         );
     }

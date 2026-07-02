@@ -198,7 +198,7 @@ fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
             "timeshift",
             &["--create", "--comments", comment, "--tags", "O"],
         ),
-        Op::SnapshotSnapper { description } => run_tty_or_err(
+        Op::SnapshotSnapper { description } => run_capture(
             "snapper",
             &[
                 "-c",
@@ -209,8 +209,6 @@ fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
                 "--description",
                 description,
             ],
-            &[],
-            fds,
         ),
         Op::RefreshMirrors { tool } => run_refresh_mirrors(*tool, fds),
         Op::RunPacdiff => run_tty_or_err("pacdiff", &[], &[("DIFFPROG", "")], fds),

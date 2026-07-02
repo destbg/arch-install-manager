@@ -6,15 +6,16 @@ use crate::helpers::flatpak::build_flatpak_update_command;
 use crate::helpers::get_navigation_stack::get_navigation_stack;
 use crate::helpers::pacman_repos::get_repository_groups;
 use crate::helpers::settings::load_settings;
-use crate::helpers::snapper::{
-    build_snapper_snapshot_command, is_snap_pac_installed, is_snapper_installed,
-};
-use crate::ipc::client::attach_session;
+use crate::helpers::snapper::{is_snap_pac_installed, is_snapper_installed};
+use crate::ipc::client::{attach_session, call};
 use crate::log_info;
+use crate::models::op::Op;
 use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
-use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog};
+use crate::ui::dialogs::{
+    create_progress_dialog, show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog,
+};
 use crate::ui::history_dialog::show_history_dialog;
 use crate::ui::install_review::review_then_install;
 use crate::ui::main_window::{
@@ -556,8 +557,6 @@ fn build_install_command(
     aur_packages: Vec<PackageUpdate>,
     flatpak_packages: Vec<PackageUpdate>,
     appimage_packages: Vec<PackageUpdate>,
-    create_timeshift: bool,
-    create_snapper: bool,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let settings = load_settings();
 
@@ -681,29 +680,10 @@ fn build_install_command(
         None
     };
 
-    let timeshift_cmd = if create_timeshift {
-        Some(format!("daim snapshot-timeshift {}", TIMESHIFT_COMMENT))
-    } else {
-        None
-    };
-
-    let snapper_cmd = if create_snapper {
-        Some(build_snapper_snapshot_command())
-    } else {
-        None
-    };
-
-    let parts: Vec<String> = [
-        timeshift_cmd,
-        snapper_cmd,
-        pacman_cmd,
-        aur_cmd,
-        flatpak_cmd,
-        appimage_cmd,
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let parts: Vec<String> = [pacman_cmd, aur_cmd, flatpak_cmd, appimage_cmd]
+        .into_iter()
+        .flatten()
+        .collect();
 
     if parts.is_empty() {
         return Ok(None);
@@ -748,24 +728,94 @@ fn navigate_to_terminal_and_install(
     create_timeshift: bool,
     create_snapper: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let needs_helper = !official_packages.is_empty()
-        || !aur_packages.is_empty()
-        || create_timeshift
-        || create_snapper;
+    let needs_helper = !official_packages.is_empty() || !aur_packages.is_empty();
 
     let Some(command) = build_install_command(
         official_packages,
         aur_packages,
         flatpak_packages,
         appimage_packages,
-        create_timeshift,
-        create_snapper,
     )?
     else {
         return Ok(());
     };
 
-    run_update_install_dialog(window, &command, needs_helper);
+    if create_timeshift || create_snapper {
+        create_snapshots_then_install(
+            window,
+            command,
+            needs_helper,
+            create_timeshift,
+            create_snapper,
+        );
+    } else {
+        run_update_install_dialog(window, &command, needs_helper);
+    }
 
+    return Ok(());
+}
+
+fn create_snapshots_then_install(
+    window: &ApplicationWindow,
+    command: String,
+    needs_helper: bool,
+    create_timeshift: bool,
+    create_snapper: bool,
+) {
+    let progress = create_progress_dialog(
+        window.upcast_ref::<gtk4::Window>(),
+        "Creating snapshot",
+        "Creating a system snapshot before updating. This can take a moment.",
+    );
+    let window = window.clone();
+    glib::spawn_future_local(async move {
+        let outcome =
+            gio::spawn_blocking(move || create_snapshots(create_timeshift, create_snapper)).await;
+        progress.close();
+
+        match outcome {
+            Ok(Ok(())) => run_update_install_dialog(&window, &command, needs_helper),
+            Ok(Err(message)) => {
+                eprintln!("Snapshot before update failed: {}", message);
+                show_error_dialog(
+                    window.upcast_ref::<gtk4::Window>(),
+                    "Snapshot Failed",
+                    &message,
+                );
+            }
+            Err(_) => {
+                show_error_dialog(
+                    window.upcast_ref::<gtk4::Window>(),
+                    "Snapshot Failed",
+                    "The snapshot could not be created. The update was not started.",
+                );
+            }
+        }
+    });
+}
+
+fn create_snapshots(create_timeshift: bool, create_snapper: bool) -> Result<(), String> {
+    if create_timeshift {
+        let resp = call(Op::SnapshotTimeshift {
+            comment: TIMESHIFT_COMMENT.to_string(),
+        })
+        .map_err(|e| e.to_string())?;
+        if !resp.is_success() {
+            return Err(
+                "Could not create the Timeshift snapshot. The update was not started.".to_string(),
+            );
+        }
+    }
+    if create_snapper {
+        let resp = call(Op::SnapshotSnapper {
+            description: TIMESHIFT_COMMENT.to_string(),
+        })
+        .map_err(|e| e.to_string())?;
+        if !resp.is_success() {
+            return Err(
+                "Could not create the Snapper snapshot. The update was not started.".to_string(),
+            );
+        }
+    }
     return Ok(());
 }

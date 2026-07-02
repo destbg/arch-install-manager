@@ -15,7 +15,3 @@ pub fn is_snap_pac_installed() -> bool {
         .map(|output| output.status.success())
         .unwrap_or(false);
 }
-
-pub fn build_snapper_snapshot_command() -> String {
-    return "daim snapshot-snapper arch-install-manager".to_string();
-}
