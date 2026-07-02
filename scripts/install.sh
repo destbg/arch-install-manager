@@ -17,6 +17,7 @@ if [[ "${1:-}" == "-u" || "${1:-}" == "--uninstall" ]]; then
     sudo rm -f /usr/share/polkit-1/rules.d/49-daim-check.rules
     sudo rm -f /usr/lib/sysusers.d/daim-build.conf
     sudo rm -rf /var/lib/daim
+    sudo rm -f /usr/share/applications/com.destbg.arch-install-manager.desktop
     sudo rm -f /usr/share/applications/arch-install-manager.desktop
     sudo rm -f /usr/lib/systemd/system/daim-check.service /usr/lib/systemd/system/daim-check.timer
     sudo rm -f /usr/lib/systemd/user/daim-tray.service
@@ -42,8 +43,9 @@ sudo install -Dm644 res/polkit/49-daim-check.rules \
 sudo install -Dm644 res/sysusers/daim-build.conf \
     /usr/lib/sysusers.d/daim-build.conf
 sudo systemd-sysusers /usr/lib/sysusers.d/daim-build.conf || die "failed to create the daim-build user"
-sudo install -Dm644 arch-install-manager.desktop \
-    /usr/share/applications/arch-install-manager.desktop
+sudo rm -f /usr/share/applications/arch-install-manager.desktop
+sudo install -Dm644 com.destbg.arch-install-manager.desktop \
+    /usr/share/applications/com.destbg.arch-install-manager.desktop
 for size in 48x48 256x256 512x512; do
     if [[ -f "icons/$size/apps/arch-install-manager.png" ]]; then
         sudo install -Dm644 "icons/$size/apps/arch-install-manager.png" \

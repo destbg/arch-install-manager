@@ -6,5 +6,6 @@ Comment=A GTK4-based install and update manager for Arch Linux
 Exec=daim-gui
 Icon=arch-install-manager
 Terminal=false
+StartupWMClass=com.destbg.arch-install-manager
 Categories=System;PackageManager;
 Keywords=arch;install;update;manager;pacman;aur;system;

@@ -45,8 +45,8 @@ package() {
 		install -Dm755 "target/release/$bin" "$pkgdir/usr/bin/$bin"
 	done
 
-	install -Dm644 "arch-install-manager.desktop" \
-		"$pkgdir/usr/share/applications/arch-install-manager.desktop"
+	install -Dm644 "com.destbg.arch-install-manager.desktop" \
+		"$pkgdir/usr/share/applications/com.destbg.arch-install-manager.desktop"
 
 	install -Dm644 "com.destbg.arch-install-manager.policy" \
 		"$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"

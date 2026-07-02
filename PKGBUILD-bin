@@ -30,8 +30,8 @@ package() {
   done
 
   local srcdir_repo="${srcdir}/${pkgname%-bin}-${pkgver}"
-  install -Dm644 "${srcdir_repo}/arch-install-manager.desktop" \
-    "$pkgdir/usr/share/applications/arch-install-manager.desktop"
+  install -Dm644 "${srcdir_repo}/com.destbg.arch-install-manager.desktop" \
+    "$pkgdir/usr/share/applications/com.destbg.arch-install-manager.desktop"
   install -Dm644 "${srcdir_repo}/com.destbg.arch-install-manager.policy" \
     "$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
   install -Dm644 "${srcdir_repo}/res/polkit/49-daim-check.rules" \
