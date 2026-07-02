@@ -95,6 +95,9 @@ fn spawn_session(mut fds: Vec<OwnedFd>, authorized_uid: u32) -> Response {
 }
 
 fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
+    if op_uses_pacman_db(&req.op) {
+        clear_stale_lock();
+    }
     match &req.op {
         Op::SyncDb => run_capture("pacman", &["-Sy"]),
         Op::SysUpgrade => run_tty_or_err("pacman", &["-Su"], &[], fds),
@@ -257,6 +260,36 @@ fn done_ok() -> Response {
         stdout: String::new(),
         stderr: String::new(),
     };
+}
+
+fn op_uses_pacman_db(op: &Op) -> bool {
+    return matches!(
+        op,
+        Op::SyncDb
+            | Op::SysUpgrade
+            | Op::SysUpgradeNoConfirm
+            | Op::Install { .. }
+            | Op::InstallFiles { .. }
+            | Op::AurBuildInstall { .. }
+            | Op::RemoveMakeDeps { .. }
+            | Op::Remove { .. }
+    );
+}
+
+fn clear_stale_lock() {
+    let lock = "/var/lib/pacman/db.lck";
+    if !Path::new(lock).exists() {
+        return;
+    }
+    let pacman_running = Command::new("pgrep")
+        .args(["-x", "pacman"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(true);
+    if pacman_running {
+        return;
+    }
+    let _ = std::fs::remove_file(lock);
 }
 
 fn run_capture(program: &str, args: &[&str]) -> Response {

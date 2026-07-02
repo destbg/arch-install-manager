@@ -17,6 +17,7 @@ pub mod pacnew_diff;
 pub mod pkgbuild_review_dialog;
 pub mod post_update_page;
 pub mod settings_dialog;
+pub mod snapshot;
 pub mod terminal_page;
 pub mod toolbar;
 pub mod vulnerabilities_dialog;

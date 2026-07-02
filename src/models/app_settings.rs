@@ -55,6 +55,12 @@ pub struct AppSettings {
     pub run_post_update_checks: bool,
     #[serde(default)]
     pub create_snapper_snapshot: bool,
+    #[serde(default = "default_true")]
+    pub snapshot_on_update: bool,
+    #[serde(default)]
+    pub snapshot_on_install: bool,
+    #[serde(default)]
+    pub snapshot_on_remove: bool,
     #[serde(default)]
     pub enable_system_tray: bool,
     #[serde(default)]

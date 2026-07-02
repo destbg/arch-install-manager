@@ -1,4 +1,3 @@
-use crate::constants::TIMESHIFT_COMMENT;
 use crate::helpers::appimage::build_appimage_update_commands;
 use crate::helpers::disk_space::available_bytes;
 use crate::helpers::elevated::open_url_as_user;
@@ -6,16 +5,13 @@ use crate::helpers::flatpak::build_flatpak_update_command;
 use crate::helpers::get_navigation_stack::get_navigation_stack;
 use crate::helpers::pacman_repos::get_repository_groups;
 use crate::helpers::settings::load_settings;
-use crate::helpers::snapper::{is_snap_pac_installed, is_snapper_installed};
-use crate::ipc::client::{attach_session, call};
+use crate::ipc::client::attach_session;
 use crate::log_info;
-use crate::models::op::Op;
+use crate::models::change_kind::ChangeKind;
 use crate::models::package_object::PackageUpdateObject;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
-use crate::ui::dialogs::{
-    create_progress_dialog, show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog,
-};
+use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog, show_partial_upgrade_dialog};
 use crate::ui::history_dialog::show_history_dialog;
 use crate::ui::install_review::review_then_install;
 use crate::ui::main_window::{
@@ -23,6 +19,7 @@ use crate::ui::main_window::{
 };
 use crate::ui::package_list::{save_unselected_from_store, update_statusbar};
 use crate::ui::settings_dialog::show_settings_dialog;
+use crate::ui::snapshot::{run_with_snapshots, snapshot_flags};
 use crate::ui::terminal_page::run_update_install_dialog;
 use crate::ui::vulnerabilities_dialog::show_vulnerabilities_dialog;
 use gio::ListStore;
@@ -115,11 +112,7 @@ pub fn create_toolbar(show_settings_button: bool) -> GtkBox {
             log_info!("toolbar: Install Updates clicked");
             if let Some((store, _statusbar)) = find_store_and_statusbar(&toolbar) {
                 if let Some(window) = toolbar.root().and_downcast::<ApplicationWindow>() {
-                    let settings = load_settings();
-                    let create_snapshot = settings.create_timeshift_snapshot;
-                    let create_snapper = settings.create_snapper_snapshot
-                        && is_snapper_installed()
-                        && !is_snap_pac_installed();
+                    let (create_snapshot, create_snapper) = snapshot_flags(ChangeKind::Update);
 
                     let mut snapshot_note = String::new();
                     if create_snapshot {
@@ -740,82 +733,10 @@ fn navigate_to_terminal_and_install(
         return Ok(());
     };
 
-    if create_timeshift || create_snapper {
-        create_snapshots_then_install(
-            window,
-            command,
-            needs_helper,
-            create_timeshift,
-            create_snapper,
-        );
-    } else {
-        run_update_install_dialog(window, &command, needs_helper);
-    }
-
-    return Ok(());
-}
-
-fn create_snapshots_then_install(
-    window: &ApplicationWindow,
-    command: String,
-    needs_helper: bool,
-    create_timeshift: bool,
-    create_snapper: bool,
-) {
-    let progress = create_progress_dialog(
-        window.upcast_ref::<gtk4::Window>(),
-        "Creating snapshot",
-        "Creating a system snapshot before updating. This can take a moment.",
-    );
-    let window = window.clone();
-    glib::spawn_future_local(async move {
-        let outcome =
-            gio::spawn_blocking(move || create_snapshots(create_timeshift, create_snapper)).await;
-        progress.close();
-
-        match outcome {
-            Ok(Ok(())) => run_update_install_dialog(&window, &command, needs_helper),
-            Ok(Err(message)) => {
-                eprintln!("Snapshot before update failed: {}", message);
-                show_error_dialog(
-                    window.upcast_ref::<gtk4::Window>(),
-                    "Snapshot Failed",
-                    &message,
-                );
-            }
-            Err(_) => {
-                show_error_dialog(
-                    window.upcast_ref::<gtk4::Window>(),
-                    "Snapshot Failed",
-                    "The snapshot could not be created. The update was not started.",
-                );
-            }
-        }
+    let window_for_update = window.clone();
+    run_with_snapshots(window, create_timeshift, create_snapper, move || {
+        run_update_install_dialog(&window_for_update, &command, needs_helper);
     });
-}
 
-fn create_snapshots(create_timeshift: bool, create_snapper: bool) -> Result<(), String> {
-    if create_timeshift {
-        let resp = call(Op::SnapshotTimeshift {
-            comment: TIMESHIFT_COMMENT.to_string(),
-        })
-        .map_err(|e| e.to_string())?;
-        if !resp.is_success() {
-            return Err(
-                "Could not create the Timeshift snapshot. The update was not started.".to_string(),
-            );
-        }
-    }
-    if create_snapper {
-        let resp = call(Op::SnapshotSnapper {
-            description: TIMESHIFT_COMMENT.to_string(),
-        })
-        .map_err(|e| e.to_string())?;
-        if !resp.is_success() {
-            return Err(
-                "Could not create the Snapper snapshot. The update was not started.".to_string(),
-            );
-        }
-    }
     return Ok(());
 }

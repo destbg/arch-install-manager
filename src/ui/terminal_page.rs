@@ -10,7 +10,7 @@ use crate::helpers::terminal::spawn_terminal;
 use crate::helpers::tray_integration::trigger_check_service;
 use crate::ipc::client::mint_terminal_session;
 use crate::log_info;
-use crate::ui::dialogs::show_error_dialog;
+use crate::ui::dialogs::{show_confirm_dialog, show_error_dialog};
 use crate::ui::main_window::{POST_UPDATE_PAGE, load_packages};
 use crate::ui::post_update_page::{
     create_post_update_page, reset_post_update_page, run_post_update_detections,
@@ -109,10 +109,34 @@ pub fn run_command_in_dialog<F>(
     let dialog_for_btn = dialog.clone();
     close_btn.connect_clicked(move |_| dialog_for_btn.close());
 
+    let finished = Rc::new(std::cell::Cell::new(false));
+    let force_close = Rc::new(std::cell::Cell::new(false));
+
     let on_finished_rc: Rc<dyn Fn()> = Rc::new(on_finished);
+    let finished_for_close = finished.clone();
+    let force_close_for_close = force_close.clone();
+    let window_for_close = window.clone();
+    let dialog_for_close = dialog.clone();
     dialog.connect_close_request(move |_| {
-        on_finished_rc();
-        return glib::Propagation::Proceed;
+        if finished_for_close.get() || force_close_for_close.get() {
+            on_finished_rc();
+            return glib::Propagation::Proceed;
+        }
+        let force_close = force_close_for_close.clone();
+        let dialog = dialog_for_close.clone();
+        show_confirm_dialog(
+            &window_for_close,
+            "Stop the running operation?",
+            "A package operation is still running. Closing now can interrupt it and leave the package database locked. Close anyway?",
+            "Close anyway",
+            move |accepted| {
+                if accepted {
+                    force_close.set(true);
+                    dialog.close();
+                }
+            },
+        );
+        return glib::Propagation::Stop;
     });
 
     let window_for_checks = window.clone();
@@ -145,9 +169,11 @@ pub fn run_command_in_dialog<F>(
     let title_for_exit = title_label.clone();
     let close_for_exit = close_btn.clone();
     let checks_for_exit = checks_btn.clone();
+    let finished_for_exit = finished.clone();
     terminal.connect_child_exited(move |term, exit_status| {
         log_info!("dialog terminal command exited: status={}", exit_status);
         capture_terminal_output(term, "dialog");
+        finished_for_exit.set(true);
 
         if exit_status != 0 {
             title_for_exit.set_text(&format!("Failed (exit {})", exit_status));

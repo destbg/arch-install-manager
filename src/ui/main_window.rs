@@ -13,6 +13,7 @@ use crate::helpers::tray_integration::trigger_check_service;
 use crate::helpers::unselected_packages::load_unselected_packages;
 use crate::ipc::client::{attach_session, set_ignore_pkg};
 use crate::log_info;
+use crate::models::change_kind::ChangeKind;
 use crate::models::info_panel::InfoPanel;
 use crate::models::package_list_kind::PackageListKind;
 use crate::models::package_object::PackageUpdateObject;
@@ -34,6 +35,7 @@ use crate::ui::package_list::{
     register_selection_button, update_statusbar,
 };
 use crate::ui::settings_dialog::show_settings_dialog;
+use crate::ui::snapshot::run_change_command;
 use crate::ui::terminal_page::run_command_in_dialog;
 use crate::ui::toolbar::create_toolbar;
 use crate::ui::vulnerabilities_dialog::show_vulnerabilities_dialog;
@@ -1182,9 +1184,16 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         let refresh = run_search_for_install.clone();
         review_then_install(&window_for_install, aur_names, move || {
             let refresh = refresh.clone();
-            run_command_in_dialog(&window, &command, true, true, move || {
-                refresh();
-            });
+            run_change_command(
+                &window,
+                command.clone(),
+                ChangeKind::Install,
+                true,
+                true,
+                move || {
+                    refresh();
+                },
+            );
         });
     });
 
@@ -1454,10 +1463,17 @@ fn wire_manage_action(
         let command = build_command(&names);
         let populate = populate.clone();
         let window_finish = window.clone();
-        run_command_in_dialog(&window, &command, true, true, move || {
-            populate();
-            remove_from_update_list(&window_finish, &names);
-        });
+        run_change_command(
+            &window,
+            command,
+            ChangeKind::Remove,
+            true,
+            true,
+            move || {
+                populate();
+                remove_from_update_list(&window_finish, &names);
+            },
+        );
     });
 }
 

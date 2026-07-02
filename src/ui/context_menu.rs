@@ -14,6 +14,7 @@ use crate::helpers::settings::{load_settings, save_settings};
 use crate::helpers::tray_integration::{kick_tray, trigger_check_service};
 use crate::ipc::client::attach_session;
 use crate::log_info;
+use crate::models::change_kind::ChangeKind;
 use crate::models::package_list_kind::PackageListKind;
 use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
@@ -25,7 +26,7 @@ use crate::ui::main_window::{load_packages, refresh_manage_list, remove_from_upd
 use crate::ui::package_files_dialog::show_package_files_dialog;
 use crate::ui::package_list::refresh_favorite_button;
 use crate::ui::pkgbuild_review_dialog::show_pkgbuild_review_dialog;
-use crate::ui::terminal_page::run_command_in_dialog;
+use crate::ui::snapshot::run_change_command;
 
 pub fn show_package_context_menu(
     anchor: &Widget,
@@ -82,7 +83,14 @@ pub fn show_package_context_menu(
                 };
                 let window_proceed = window.clone();
                 review_then_install(&window, aur_names, move || {
-                    run_command_in_dialog(&window_proceed, &command, true, true, || {});
+                    run_change_command(
+                        &window_proceed,
+                        command.clone(),
+                        ChangeKind::Install,
+                        true,
+                        true,
+                        || {},
+                    );
                 });
             }
         });
@@ -99,10 +107,17 @@ pub fn show_package_context_menu(
                 let command = format!("daim remove {}", quoted);
                 let window_finish = window.clone();
                 let name_finish = name.clone();
-                run_command_in_dialog(&window, &command, true, true, move || {
-                    refresh_manage_list();
-                    remove_from_update_list(&window_finish, std::slice::from_ref(&name_finish));
-                });
+                run_change_command(
+                    &window,
+                    command,
+                    ChangeKind::Remove,
+                    true,
+                    true,
+                    move || {
+                        refresh_manage_list();
+                        remove_from_update_list(&window_finish, std::slice::from_ref(&name_finish));
+                    },
+                );
             }
         });
         add_separator(&vbox);

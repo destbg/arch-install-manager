@@ -814,13 +814,33 @@ fn create_snapshot_group(settings: &AppSettings, main_container: &gtk4::Box) -> 
         "Automatically create a system snapshot before installing updates for easy rollback if needed.",
     );
 
-    let enable_check = gtk4::CheckButton::with_label("Create a system snapshot before the update");
+    let enable_check = gtk4::CheckButton::with_label("Enable system snapshots");
     enable_check.add_css_class("settings-check");
 
     let initial_enabled = (settings.create_timeshift_snapshot && has_timeshift)
         || (settings.create_snapper_snapshot && has_snapper);
     enable_check.set_active(initial_enabled);
     section.append(&enable_check);
+
+    let when_available = has_timeshift || has_snapper;
+
+    let update_check = gtk4::CheckButton::with_label("When updating packages");
+    update_check.add_css_class("settings-check");
+    update_check.set_active(settings.snapshot_on_update);
+    update_check.set_sensitive(initial_enabled && when_available);
+    section.append(&update_check);
+
+    let install_check = gtk4::CheckButton::with_label("When installing packages");
+    install_check.add_css_class("settings-check");
+    install_check.set_active(settings.snapshot_on_install);
+    install_check.set_sensitive(initial_enabled && when_available);
+    section.append(&install_check);
+
+    let remove_check = gtk4::CheckButton::with_label("When removing packages");
+    remove_check.add_css_class("settings-check");
+    remove_check.set_active(settings.snapshot_on_remove);
+    remove_check.set_sensitive(initial_enabled && when_available);
+    section.append(&remove_check);
 
     if !has_timeshift && !has_snapper {
         enable_check.set_sensitive(false);
@@ -955,6 +975,9 @@ fn create_snapshot_group(settings: &AppSettings, main_container: &gtk4::Box) -> 
 
     return SnapshotGroup {
         enable_check,
+        update_check,
+        install_check,
+        remove_check,
         provider_combo,
         retention_count_spin,
         retention_period_combo,
@@ -970,6 +993,9 @@ fn create_snapshot_group(settings: &AppSettings, main_container: &gtk4::Box) -> 
 
 fn save_snapshot_settings(group: &SnapshotGroup) {
     let enabled = group.enable_check.is_active();
+    let on_update = group.update_check.is_active();
+    let on_install = group.install_check.is_active();
+    let on_remove = group.remove_check.is_active();
     let is_timeshift = dropdown_active_id(&group.provider_combo).as_deref() == Some("timeshift");
     let is_snapper = dropdown_active_id(&group.provider_combo).as_deref() == Some("snapper");
     let count = group.retention_count_spin.value() as u32;
@@ -984,6 +1010,9 @@ fn save_snapshot_settings(group: &SnapshotGroup) {
     update_settings(move |s| {
         s.create_timeshift_snapshot = enabled && is_timeshift;
         s.create_snapper_snapshot = enabled && is_snapper;
+        s.snapshot_on_update = on_update;
+        s.snapshot_on_install = on_install;
+        s.snapshot_on_remove = on_remove;
         s.snapshot_retention_count = count;
         s.snapshot_retention_period = period;
     });
@@ -1000,11 +1029,17 @@ fn wire_snapshot_group_signals(group: &SnapshotGroup) {
     let retention_period_box_w = group.retention_period_box.clone();
     let deletion_info_label_w = group.deletion_info_label.clone();
     let snap_pac_info_w = group.snap_pac_info.clone();
+    let update_check_w = group.update_check.clone();
+    let install_check_w = group.install_check.clone();
+    let remove_check_w = group.remove_check.clone();
     let snap_pac_installed = group.snap_pac_installed;
     let save_clone = save.clone();
     group.enable_check.connect_toggled(move |check| {
         let enabled = check.is_active();
         provider_combo_w.set_sensitive(enabled);
+        update_check_w.set_sensitive(enabled);
+        install_check_w.set_sensitive(enabled);
+        remove_check_w.set_sensitive(enabled);
         let is_timeshift = dropdown_active_id(&provider_combo_w).as_deref() == Some("timeshift");
         let is_snapper = dropdown_active_id(&provider_combo_w).as_deref() == Some("snapper");
         retention_count_box_w.set_sensitive(enabled && is_timeshift);
@@ -1013,6 +1048,21 @@ fn wire_snapshot_group_signals(group: &SnapshotGroup) {
         retention_period_box_w.set_visible(is_timeshift);
         deletion_info_label_w.set_visible(is_timeshift);
         snap_pac_info_w.set_visible(enabled && is_snapper && snap_pac_installed);
+        save_clone();
+    });
+
+    let save_clone = save.clone();
+    group.update_check.connect_toggled(move |_| {
+        save_clone();
+    });
+
+    let save_clone = save.clone();
+    group.install_check.connect_toggled(move |_| {
+        save_clone();
+    });
+
+    let save_clone = save.clone();
+    group.remove_check.connect_toggled(move |_| {
         save_clone();
     });
 

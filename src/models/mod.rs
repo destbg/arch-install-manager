@@ -7,6 +7,7 @@ pub mod aur_plan;
 pub mod aur_scan_finding;
 pub mod cache_candidates;
 pub mod cached_version;
+pub mod change_kind;
 pub mod check_schedule;
 pub mod diff_row;
 pub mod discovered_appimage;

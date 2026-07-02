@@ -1,6 +1,9 @@
 #[derive(Clone)]
 pub struct SnapshotGroup {
     pub enable_check: gtk4::CheckButton,
+    pub update_check: gtk4::CheckButton,
+    pub install_check: gtk4::CheckButton,
+    pub remove_check: gtk4::CheckButton,
     pub provider_combo: gtk4::DropDown,
     pub retention_count_spin: gtk4::SpinButton,
     pub retention_period_combo: gtk4::DropDown,
