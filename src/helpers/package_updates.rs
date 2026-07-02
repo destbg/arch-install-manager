@@ -1,11 +1,13 @@
 use alpm::{Alpm, SigLevel};
 use anyhow::{Context, Result};
+use libc::geteuid;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::os::unix::fs::symlink;
 use std::process::Command;
-use std::{error, fmt};
+use std::{env, error, fmt, fs};
 
 use crate::helpers::appimage::get_appimage_updates;
 use crate::helpers::aur::get_aur_updates;
@@ -42,8 +44,10 @@ impl From<anyhow::Error> for UpdateError {
 }
 
 pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
+    let db_path = sync_temp_db()?;
+
     let output = Command::new("pacman")
-        .args(["-Qu"])
+        .args(["-Qu", "--dbpath", &db_path])
         .output()
         .context("Failed to run pacman -Qu")?;
 
@@ -90,7 +94,8 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
             .iter()
             .map(|(name, _, _)| name.as_str())
             .collect();
-        let (package_info_map, repo_sizes_map) = get_batch_repository_info(&package_names, None)?;
+        let (package_info_map, repo_sizes_map) =
+            get_batch_repository_info(&package_names, Some(&db_path))?;
         let installed_sizes_map = get_batch_installed_sizes(&package_names)?;
         let build_dates_map = get_build_dates(&package_names);
 
@@ -211,6 +216,42 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
     });
 
     return Ok(updates);
+}
+
+pub fn sync_temp_db() -> Result<String, UpdateError> {
+    let uid = unsafe { geteuid() };
+    let db_path = env::temp_dir().join(format!("daim-checkup-db-{}", uid));
+    fs::create_dir_all(db_path.join("sync"))?;
+
+    let local_link = db_path.join("local");
+    if !local_link.exists() {
+        symlink("/var/lib/pacman/local", &local_link)?;
+    }
+
+    let db_arg = db_path.to_string_lossy().to_string();
+    let sync = if uid == 0 {
+        Command::new("pacman")
+            .args(["-Sy", "--dbpath", &db_arg, "--logfile", "/dev/null"])
+            .output()?
+    } else {
+        Command::new("fakeroot")
+            .args([
+                "--",
+                "pacman",
+                "-Sy",
+                "--dbpath",
+                &db_arg,
+                "--logfile",
+                "/dev/null",
+                "--disable-sandbox",
+            ])
+            .output()?
+    };
+    if !sync.status.success() {
+        let stderr = String::from_utf8_lossy(&sync.stderr);
+        return Err(UpdateError::SyncFailed(stderr.trim().to_string()));
+    }
+    return Ok(db_arg);
 }
 
 fn get_batch_repository_info(
