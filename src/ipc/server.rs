@@ -1,5 +1,6 @@
 use std::io;
 use std::os::fd::OwnedFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::models::response::Response;
 const BUILD_USER: &str = "daim-build";
 const AUR_CLONE_SUBDIR: &str = ".cache/daim/aur";
 const BUILD_ROOT: &str = "/var/lib/daim/build";
+const BUILD_HOME: &str = "/var/lib/daim/home";
 const BUILD_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
 const CONNECT_ATTEMPTS: u32 = 30;
 
@@ -410,6 +412,24 @@ fn prepare_build_dir(source_dir: &Path, build_dir: &Path, builder: &User) -> Res
     return Ok(());
 }
 
+fn ensure_build_home(builder: &User) -> Result<String, String> {
+    let home = Path::new(BUILD_HOME);
+    std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| e.to_string())?;
+
+    let spec = format!("{}:{}", builder.uid.as_raw(), builder.gid.as_raw());
+    let owned = Command::new("chown")
+        .arg(&spec)
+        .arg(home)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !owned.success() {
+        return Err("failed to set build home ownership".to_string());
+    }
+    return Ok(home.to_string_lossy().to_string());
+}
+
 fn run_build_and_install(
     build_dir: &Path,
     builder: &User,
@@ -418,7 +438,10 @@ fn run_build_and_install(
 ) -> Response {
     let uid = builder.uid.as_raw();
     let gid = builder.gid.as_raw();
-    let home = builder.dir.to_string_lossy().to_string();
+    let home = match ensure_build_home(builder) {
+        Ok(home) => home,
+        Err(e) => return Response::error(e),
+    };
 
     let mut makepkg = Command::new("makepkg");
     makepkg
