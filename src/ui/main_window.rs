@@ -1013,7 +1013,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     let tab = GtkBox::new(Orientation::Vertical, 0);
 
     let search_entry = SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Search the official repositories, then press Enter"));
+    search_entry.set_placeholder_text(Some("Search the selected providers, then press Enter"));
     search_entry.set_hexpand(true);
 
     let official_toggle = source_filter_toggle(
@@ -1022,11 +1022,11 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         settings.install_search_official,
         true,
     );
-    let flatpak_toggle = source_filter_toggle(
-        flatpak_source_icon(),
-        "Show Flatpak packages",
-        settings.enable_flatpak_support && settings.install_search_flatpak,
-        settings.enable_flatpak_support,
+    let aur_toggle = source_filter_toggle(
+        aur_source_icon(),
+        "Show packages from the AUR",
+        settings.install_search_aur,
+        true,
     );
 
     let actions_separator = Separator::new(Orientation::Vertical);
@@ -1041,7 +1041,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     search_row.set_margin_bottom(8);
     search_row.append(&search_entry);
     search_row.append(&official_toggle);
-    search_row.append(&flatpak_toggle);
+    search_row.append(&aur_toggle);
     search_row.append(&actions_separator);
     search_row.append(&install_btn);
     tab.append(&search_row);
@@ -1070,7 +1070,7 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
         let spinner = spinner.clone();
         let list_view = list_view.clone();
         let official_toggle = official_toggle.clone();
-        let flatpak_toggle = flatpak_toggle.clone();
+        let aur_toggle = aur_toggle.clone();
         std::rc::Rc::new(move || {
             let query = entry.text().to_string();
             let store = store.clone();
@@ -1080,8 +1080,8 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
             let list_view = list_view.clone();
             let sources = SearchSources {
                 official: official_toggle.is_active(),
-                aur: false,
-                flatpak: flatpak_toggle.is_active(),
+                aur: aur_toggle.is_active(),
+                flatpak: false,
             };
             show_loading(&loading, &spinner);
             if query.trim().is_empty() {
@@ -1153,9 +1153,9 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
 
     {
         let run = run_search.clone();
-        flatpak_toggle.connect_toggled(move |toggle| {
+        aur_toggle.connect_toggled(move |toggle| {
             let mut settings = load_settings();
-            settings.install_search_flatpak = toggle.is_active();
+            settings.install_search_aur = toggle.is_active();
             let _ = save_settings(&settings);
             run();
             return;
@@ -1290,14 +1290,13 @@ fn official_source_icon() -> &'static str {
     );
 }
 
-fn flatpak_source_icon() -> &'static str {
+fn aur_source_icon() -> &'static str {
     return first_available_icon(
         &[
-            "arch-install-manager-flatpak-symbolic",
-            "flatpak-symbolic",
-            "org.flatpak.Flatpak-symbolic",
+            "arch-install-manager-aur-symbolic",
+            "package-x-generic-symbolic",
         ],
-        "application-x-addon-symbolic",
+        "system-software-install-symbolic",
     );
 }
 
