@@ -429,7 +429,7 @@ impl Tray for ArchUpdateTray {
 
         items.push(
             StandardItem {
-                label: "Open Update Manager".into(),
+                label: "Open Software Manager".into(),
                 activate: Box::new(|_: &mut Self| Self::launch_main_app()),
                 ..Default::default()
             }
@@ -706,7 +706,7 @@ fn fire_notification(count: usize) {
             .icon("arch-install-manager")
             .appname("Arch Install Manager")
             .action("default", "Open")
-            .action("open", "Open Update Manager")
+            .action("open", "Open Software Manager")
             .show();
 
         match result {
@@ -738,7 +738,7 @@ fn fire_check_complete_notification(count: usize) {
         let result = if count > 0 {
             notification
                 .action("default", "Open")
-                .action("open", "Open Update Manager")
+                .action("open", "Open Software Manager")
                 .show()
         } else {
             notification.show()
