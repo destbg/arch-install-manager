@@ -34,16 +34,13 @@ package() {
     "$pkgdir/usr/share/applications/com.destbg.arch-install-manager.desktop"
   install -Dm644 "${srcdir_repo}/com.destbg.arch-install-manager.policy" \
     "$pkgdir/usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy"
-  install -Dm644 "${srcdir_repo}/res/polkit/49-daim-check.rules" \
-    "$pkgdir/usr/share/polkit-1/rules.d/49-daim-check.rules"
-
   install -Dm644 "${srcdir_repo}/res/sysusers/daim-build.conf" \
     "$pkgdir/usr/lib/sysusers.d/daim-build.conf"
 
   for unit in daim-check.service daim-check.timer; do
     if [[ -f "${srcdir_repo}/res/systemd/${unit}" ]]; then
       install -Dm644 "${srcdir_repo}/res/systemd/${unit}" \
-        "$pkgdir/usr/lib/systemd/system/${unit}"
+        "$pkgdir/usr/lib/systemd/user/${unit}"
     fi
   done
   if [[ -f "${srcdir_repo}/res/systemd/daim-tray.service" ]]; then

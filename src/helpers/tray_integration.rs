@@ -12,9 +12,7 @@ const TRAY_SERVICE: &str = "daim-tray.service";
 
 pub fn trigger_check_service() {
     std::thread::spawn(|| {
-        let _ = Command::new("systemctl")
-            .args(["start", CHECK_SERVICE])
-            .status();
+        run_user_systemctl(&["start", CHECK_SERVICE]);
     });
 }
 
@@ -28,8 +26,10 @@ pub fn apply_tray_state(enabled: bool) {
     remove_legacy_autostart_file();
 
     if enabled {
+        run_user_systemctl(&["enable", "--now", TIMER_UNIT]);
         run_user_systemctl(&["enable", "--now", TRAY_SERVICE]);
     } else {
+        run_user_systemctl(&["disable", "--now", TIMER_UNIT]);
         run_user_systemctl(&["disable", "--now", TRAY_SERVICE]);
     }
 }

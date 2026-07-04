@@ -10,6 +10,7 @@ cd "$proj" || die "cannot enter project directory"
 
 if [[ "${1:-}" == "-u" || "${1:-}" == "--uninstall" ]]; then
     step "Removing daim from the system"
+    systemctl --user disable --now daim-check.timer 2>/dev/null || true
     sudo systemctl disable --now daim-check.timer 2>/dev/null || true
     systemctl --user disable --now daim-tray.service 2>/dev/null || true
     sudo rm -f /usr/bin/daim /usr/bin/daim-gui /usr/bin/daim-helper /usr/bin/daim-tray /usr/bin/daim-check
@@ -19,6 +20,7 @@ if [[ "${1:-}" == "-u" || "${1:-}" == "--uninstall" ]]; then
     sudo rm -rf /var/lib/daim
     sudo rm -f /usr/share/applications/com.destbg.arch-install-manager.desktop
     sudo rm -f /usr/share/applications/arch-install-manager.desktop
+    sudo rm -f /usr/lib/systemd/user/daim-check.service /usr/lib/systemd/user/daim-check.timer
     sudo rm -f /usr/lib/systemd/system/daim-check.service /usr/lib/systemd/system/daim-check.timer
     sudo rm -f /usr/lib/systemd/user/daim-tray.service
     sudo rm -f /usr/share/icons/hicolor/*/apps/arch-install-manager.png
@@ -38,8 +40,7 @@ for b in daim daim-gui daim-helper daim-tray daim-check; do
 done
 sudo install -Dm644 com.destbg.arch-install-manager.policy \
     /usr/share/polkit-1/actions/com.destbg.arch-install-manager.policy
-sudo install -Dm644 res/polkit/49-daim-check.rules \
-    /usr/share/polkit-1/rules.d/49-daim-check.rules
+sudo rm -f /usr/share/polkit-1/rules.d/49-daim-check.rules
 sudo install -Dm644 res/sysusers/daim-build.conf \
     /usr/lib/sysusers.d/daim-build.conf
 sudo systemd-sysusers /usr/lib/sysusers.d/daim-build.conf || die "failed to create the daim-build user"
@@ -67,12 +68,15 @@ fi
 ok "installed (coexists with arch-update-manager)"
 
 step "Installing systemd units"
-sudo install -Dm644 res/systemd/daim-check.service /usr/lib/systemd/system/daim-check.service
-sudo install -Dm644 res/systemd/daim-check.timer /usr/lib/systemd/system/daim-check.timer
+sudo systemctl disable --now daim-check.timer 2>/dev/null || true
+sudo rm -f /usr/lib/systemd/system/daim-check.service /usr/lib/systemd/system/daim-check.timer
+sudo install -Dm644 res/systemd/daim-check.service /usr/lib/systemd/user/daim-check.service
+sudo install -Dm644 res/systemd/daim-check.timer /usr/lib/systemd/user/daim-check.timer
 sudo install -Dm644 res/systemd/daim-tray.service /usr/lib/systemd/user/daim-tray.service
 sudo systemctl daemon-reload
 systemctl --user daemon-reload
-sudo systemctl enable --now daim-check.timer 2>/dev/null && ok "root check timer enabled" || true
+systemctl --user enable --now daim-check.timer 2>/dev/null && ok "check timer enabled" || true
+systemctl --user start daim-check.service 2>/dev/null && ok "first update check done" || true
 systemctl --user enable daim-tray.service 2>/dev/null || true
 systemctl --user restart daim-tray.service 2>/dev/null && ok "user tray service (re)started with the new binary" || true
 

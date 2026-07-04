@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::os::unix::fs::symlink;
+use std::os::unix::io::AsRawFd;
 use std::process::Command;
 use std::{env, error, fmt, fs};
 
@@ -226,6 +227,18 @@ pub fn sync_temp_db() -> Result<String, UpdateError> {
     let local_link = db_path.join("local");
     if !local_link.exists() {
         symlink("/var/lib/pacman/local", &local_link)?;
+    }
+
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(db_path.join("sync.lock"))?;
+    let locked = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) } == 0;
+    if locked {
+        let stale_lock = db_path.join("db.lck");
+        if stale_lock.exists() {
+            let _ = fs::remove_file(&stale_lock);
+        }
     }
 
     let db_arg = db_path.to_string_lossy().to_string();
