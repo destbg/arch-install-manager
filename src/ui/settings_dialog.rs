@@ -11,6 +11,10 @@ use crate::{
         logger::open_logs_folder,
         pacman_repos::get_repository_groups,
         settings::{load_settings, save_settings},
+        shortcuts::{
+            SHORTCUT_COUNT, accels_equal, is_modifier_key, shortcut_default, shortcut_display,
+            shortcut_get, shortcut_label, shortcut_set,
+        },
         snapper::{is_snap_pac_installed, is_snapper_installed},
         tray_integration::{
             apply_check_schedule, apply_tray_state, has_systemd_user_session, kick_tray,
@@ -95,10 +99,13 @@ pub fn show_settings_dialog(
     let news_check = create_news_group(settings, &topbar_container);
     let mirror_refresh_check = create_mirror_group(settings, &topbar_container);
 
+    let shortcuts_container = build_tab_container();
+    create_shortcuts_group(settings, &shortcuts_container);
+
     let system_container = build_tab_container();
     let log_retention_spin = create_logs_group(settings, &system_container);
 
-    let categories: [(&str, &str); 9] = [
+    let categories: [(&str, &str); 10] = [
         ("Updates", "software-update-available-symbolic"),
         ("AppImages", "application-x-executable-symbolic"),
         ("Repositories", "drive-harddisk-symbolic"),
@@ -110,6 +117,7 @@ pub fn show_settings_dialog(
         ("Appearance", "preferences-desktop-appearance-symbolic"),
         ("Favorites", "starred-symbolic"),
         ("Top Bar", "open-menu-symbolic"),
+        ("Shortcuts", "input-keyboard-symbolic"),
         ("System", "emblem-system-symbolic"),
     ];
 
@@ -122,6 +130,7 @@ pub fn show_settings_dialog(
         appearance_container,
         favorites_container,
         topbar_container,
+        shortcuts_container,
         system_container,
     ];
 
@@ -1735,6 +1744,122 @@ fn create_logs_group(settings: &AppSettings, main_container: &gtk4::Box) -> gtk4
     main_container.append(&section);
 
     return spin;
+}
+
+fn create_shortcuts_group(settings: &AppSettings, main_container: &gtk4::Box) {
+    let section = create_preference_group(
+        "Keyboard Shortcuts",
+        "Click a shortcut and press the new key combination to change it. Press Escape to cancel or Backspace to disable it.",
+    );
+
+    let buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
+
+    for index in 0..SHORTCUT_COUNT {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        row.set_hexpand(true);
+        if index > 0 {
+            row.set_margin_top(8);
+        }
+
+        let label = gtk4::Label::new(Some(shortcut_label(index)));
+        label.set_halign(gtk4::Align::Start);
+        label.set_hexpand(true);
+        row.append(&label);
+
+        let button = gtk4::Button::with_label(&shortcut_display(settings, index));
+        button.set_halign(gtk4::Align::End);
+        wire_shortcut_capture(&button, index, buttons.clone());
+        buttons.borrow_mut().push(button.clone());
+        row.append(&button);
+
+        section.append(&row);
+    }
+
+    let reset_btn = build_padded_button("Reset Shortcuts");
+    reset_btn.set_halign(gtk4::Align::Start);
+    reset_btn.set_margin_top(12);
+    let buttons_for_reset = buttons.clone();
+    reset_btn.connect_clicked(move |_| {
+        log_info!("settings: reset shortcuts clicked");
+        update_settings(|s| {
+            for index in 0..SHORTCUT_COUNT {
+                let default = shortcut_default(index);
+                shortcut_set(s, index, &default);
+            }
+        });
+        refresh_shortcut_buttons(&buttons_for_reset);
+    });
+    section.append(&reset_btn);
+
+    main_container.append(&section);
+    return;
+}
+
+fn refresh_shortcut_buttons(buttons: &Rc<RefCell<Vec<gtk4::Button>>>) {
+    let settings = load_settings();
+    for (index, button) in buttons.borrow().iter().enumerate() {
+        button.set_label(&shortcut_display(&settings, index));
+    }
+    return;
+}
+
+fn wire_shortcut_capture(
+    button: &gtk4::Button,
+    index: usize,
+    buttons: Rc<RefCell<Vec<gtk4::Button>>>,
+) {
+    let capturing = Rc::new(Cell::new(false));
+
+    {
+        let capturing = capturing.clone();
+        let button_for_click = button.clone();
+        button.connect_clicked(move |_| {
+            capturing.set(true);
+            button_for_click.set_label("Press shortcut...");
+        });
+    }
+
+    let controller = gtk4::EventControllerKey::new();
+    let button_for_key = button.clone();
+    controller.connect_key_pressed(move |_, keyval, _keycode, state| {
+        if !capturing.get() {
+            return glib::Propagation::Proceed;
+        }
+        if keyval == gtk4::gdk::Key::Escape {
+            capturing.set(false);
+            refresh_shortcut_buttons(&buttons);
+            return glib::Propagation::Stop;
+        }
+        if is_modifier_key(keyval) {
+            return glib::Propagation::Stop;
+        }
+        if keyval == gtk4::gdk::Key::BackSpace || keyval == gtk4::gdk::Key::Delete {
+            capturing.set(false);
+            update_settings(move |s| shortcut_set(s, index, ""));
+            refresh_shortcut_buttons(&buttons);
+            return glib::Propagation::Stop;
+        }
+        let mods = state & gtk4::accelerator_get_default_mod_mask();
+        if mods.is_empty() {
+            button_for_key.set_label("Add a modifier like Ctrl");
+            return glib::Propagation::Stop;
+        }
+        capturing.set(false);
+        let accel = gtk4::accelerator_name(keyval, mods).to_string();
+        log_info!("settings: shortcut {} changed to {}", index, accel);
+        update_settings(move |s| {
+            shortcut_set(s, index, &accel);
+            for other in 0..SHORTCUT_COUNT {
+                if other != index && accels_equal(shortcut_get(s, other), &accel) {
+                    shortcut_set(s, other, "");
+                }
+            }
+        });
+        refresh_shortcut_buttons(&buttons);
+        return glib::Propagation::Stop;
+    });
+    button.add_controller(controller);
+    return;
 }
 
 fn install_settings_css() {

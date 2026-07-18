@@ -9,6 +9,7 @@ use crate::helpers::pacman_ignore::{is_in_managed_ignore_pkg, list_managed_ignor
 use crate::helpers::release_notes::release_notes_url;
 use crate::helpers::search::{featured_packages, search_packages};
 use crate::helpers::settings::{load_settings, save_settings};
+use crate::helpers::shortcuts::shortcut_matches;
 use crate::helpers::tray_integration::trigger_check_service;
 use crate::helpers::unselected_packages::load_unselected_packages;
 use crate::ipc::client::{attach_session, set_ignore_pkg};
@@ -930,17 +931,79 @@ fn create_main_content(decorations_disabled: bool, window: &ApplicationWindow) -
 
     let view_stack = Stack::new();
     view_stack.set_vexpand(true);
-    view_stack.add_titled(&build_install_tab(window), Some("install"), "Install");
-    view_stack.add_titled(
-        &build_update_tab(decorations_disabled, window),
-        Some("update"),
-        "Update",
-    );
-    view_stack.add_titled(&build_manage_tab(window), Some("manage"), "Manage");
+    let install_tab = build_install_tab(window);
+    let update_tab = build_update_tab(decorations_disabled, window);
+    let manage_tab = build_manage_tab(window);
+    view_stack.add_titled(&install_tab, Some("install"), "Install");
+    view_stack.add_titled(&update_tab, Some("update"), "Update");
+    view_stack.add_titled(&manage_tab, Some("manage"), "Manage");
     view_stack.set_visible_child_name("update");
+
+    wire_tab_shortcuts(window, &view_stack, &install_tab, &manage_tab);
 
     content_box.append(&view_stack);
     return content_box;
+}
+
+fn tab_search_entry(tab: &GtkBox) -> Option<SearchEntry> {
+    return tab
+        .first_child()?
+        .first_child()?
+        .downcast::<SearchEntry>()
+        .ok();
+}
+
+fn focus_tab_search(tab: &GtkBox) {
+    if let Some(entry) = tab_search_entry(tab) {
+        entry.grab_focus();
+    }
+    return;
+}
+
+fn wire_tab_shortcuts(
+    window: &ApplicationWindow,
+    view_stack: &Stack,
+    install_tab: &GtkBox,
+    manage_tab: &GtkBox,
+) {
+    let controller = EventControllerKey::new();
+    controller.set_propagation_phase(PropagationPhase::Capture);
+    let view_stack = view_stack.clone();
+    let install_tab = install_tab.clone();
+    let manage_tab = manage_tab.clone();
+    controller.connect_key_pressed(move |_, keyval, _keycode, state| {
+        let settings = load_settings();
+        if shortcut_matches(&settings.shortcut_install_tab, keyval, state) {
+            view_stack.set_visible_child_name("install");
+            focus_tab_search(&install_tab);
+            return glib::Propagation::Stop;
+        }
+        if shortcut_matches(&settings.shortcut_update_tab, keyval, state) {
+            view_stack.set_visible_child_name("update");
+            return glib::Propagation::Stop;
+        }
+        if shortcut_matches(&settings.shortcut_manage_tab, keyval, state) {
+            view_stack.set_visible_child_name("manage");
+            focus_tab_search(&manage_tab);
+            return glib::Propagation::Stop;
+        }
+        if shortcut_matches(&settings.shortcut_focus_search, keyval, state) {
+            match view_stack.visible_child_name().as_deref() {
+                Some("install") => {
+                    focus_tab_search(&install_tab);
+                    return glib::Propagation::Stop;
+                }
+                Some("manage") => {
+                    focus_tab_search(&manage_tab);
+                    return glib::Propagation::Stop;
+                }
+                _ => {}
+            }
+        }
+        return glib::Propagation::Proceed;
+    });
+    window.add_controller(controller);
+    return;
 }
 
 fn collect_selected_names(store: &ListStore) -> Vec<String> {
@@ -1122,9 +1185,9 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     {
         let run = run_search.clone();
         let loaded = std::rc::Rc::new(std::cell::Cell::new(false));
-        let list_view = list_view.clone();
+        let search_entry_focus = search_entry.clone();
         tab.connect_map(move |_| {
-            list_view.grab_focus();
+            search_entry_focus.grab_focus();
             if !loaded.replace(true) {
                 run();
             }
@@ -1374,9 +1437,9 @@ fn build_manage_tab(window: &ApplicationWindow) -> GtkBox {
 
     {
         let populate = populate.clone();
-        let list_view = list_view.clone();
+        let search_entry_focus = search_entry.clone();
         tab.connect_map(move |_| {
-            list_view.grab_focus();
+            search_entry_focus.grab_focus();
             populate();
         });
     }

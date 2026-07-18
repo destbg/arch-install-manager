@@ -12,10 +12,12 @@ target/
 # AI
 .github/context-mode
 AGENTS.md
-.claude/
 opencode.json
-.kimi-code/
-.agents/
+
+# Dot folders
+.*/
+!.github/
+!.vscode/
 
 # AUR build artifacts
 arch-install-manager-*.pkg.tar.zst

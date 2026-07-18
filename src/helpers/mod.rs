@@ -30,6 +30,7 @@ pub mod repo_switches;
 pub mod search;
 pub mod security;
 pub mod settings;
+pub mod shortcuts;
 pub mod snapper;
 pub mod snooze;
 pub mod terminal;

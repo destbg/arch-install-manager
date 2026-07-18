@@ -99,6 +99,14 @@ pub struct AppSettings {
     pub install_search_flatpak: bool,
     #[serde(default)]
     pub always_show_pkgbuild: bool,
+    #[serde(default = "default_shortcut_install_tab")]
+    pub shortcut_install_tab: String,
+    #[serde(default = "default_shortcut_update_tab")]
+    pub shortcut_update_tab: String,
+    #[serde(default = "default_shortcut_manage_tab")]
+    pub shortcut_manage_tab: String,
+    #[serde(default = "default_shortcut_focus_search")]
+    pub shortcut_focus_search: String,
 }
 
 impl AppSettings {
@@ -179,4 +187,20 @@ fn default_enable_mirror_refresh() -> bool {
 
 fn default_true() -> bool {
     return true;
+}
+
+pub fn default_shortcut_install_tab() -> String {
+    return "<Ctrl>1".to_string();
+}
+
+pub fn default_shortcut_update_tab() -> String {
+    return "<Ctrl>2".to_string();
+}
+
+pub fn default_shortcut_manage_tab() -> String {
+    return "<Ctrl>3".to_string();
+}
+
+pub fn default_shortcut_focus_search() -> String {
+    return "<Ctrl>F".to_string();
 }

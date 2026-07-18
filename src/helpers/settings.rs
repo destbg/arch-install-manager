@@ -5,7 +5,10 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::helpers::aur::is_command_available;
 use crate::helpers::elevated::chown_to_user;
-use crate::models::app_settings::AppSettings;
+use crate::models::app_settings::{
+    AppSettings, default_shortcut_focus_search, default_shortcut_install_tab,
+    default_shortcut_manage_tab, default_shortcut_update_tab,
+};
 use crate::models::check_schedule::CheckSchedule;
 use crate::models::snapshot_retention_period::SnapshotRetentionPeriod;
 
@@ -98,6 +101,10 @@ fn default_settings() -> AppSettings {
         install_search_aur: true,
         install_search_flatpak: false,
         always_show_pkgbuild: false,
+        shortcut_install_tab: default_shortcut_install_tab(),
+        shortcut_update_tab: default_shortcut_update_tab(),
+        shortcut_manage_tab: default_shortcut_manage_tab(),
+        shortcut_focus_search: default_shortcut_focus_search(),
     };
 }
 
