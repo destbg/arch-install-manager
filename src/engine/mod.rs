@@ -49,6 +49,7 @@ pub fn install(
         return 1;
     }
 
+    println!("Refreshing package databases...");
     let _ = client::call(Op::SyncDb);
 
     let fresh_targets = fresh_install_targets(targets);
@@ -347,18 +348,54 @@ fn push_pick(out: &mut Vec<usize>, number: usize, total: usize) {
 }
 
 fn partition_targets(targets: &[String]) -> (Vec<String>, Vec<String>) {
+    let probes: Vec<String> = targets
+        .iter()
+        .filter(|target| !target.starts_with("aur/"))
+        .cloned()
+        .collect();
+    let repo_set = repo_names(&probes);
+
     let mut repo = Vec::new();
     let mut aur = Vec::new();
     for target in targets {
         if let Some(name) = target.strip_prefix("aur/") {
             aur.push(name.to_string());
-        } else if is_repo_package(target) {
+        } else if repo_set.contains(target.as_str()) {
             repo.push(target.clone());
         } else {
             aur.push(target.clone());
         }
     }
     return (repo, aur);
+}
+
+fn repo_names(names: &[String]) -> HashSet<String> {
+    let mut repo = HashSet::new();
+    if names.is_empty() {
+        return repo;
+    }
+    let mut args = vec!["-Si", "--"];
+    args.extend(names.iter().map(|s| s.as_str()));
+    let Ok(output) = Command::new("pacman")
+        .env("LC_ALL", "C")
+        .args(&args)
+        .output()
+    else {
+        return repo;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if !line.starts_with("Name") {
+            continue;
+        }
+        if let Some((_, value)) = line.split_once(':') {
+            let value = value.trim();
+            if !value.is_empty() {
+                repo.insert(value.to_string());
+            }
+        }
+    }
+    return repo;
 }
 
 fn is_repo_package(name: &str) -> bool {
@@ -533,18 +570,36 @@ fn current_orphans() -> HashSet<String> {
 }
 
 fn fresh_install_targets(targets: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut names = Vec::new();
     let mut seen = HashSet::new();
     for target in targets {
         let name = target.strip_prefix("aur/").unwrap_or(target).to_string();
-        if !seen.insert(name.clone()) {
-            continue;
-        }
-        if !is_installed(&name) {
-            out.push(name);
+        if seen.insert(name.clone()) {
+            names.push(name);
         }
     }
-    return out;
+    let installed = installed_names(&names);
+    names.retain(|name| !installed.contains(name.as_str()));
+    return names;
+}
+
+fn installed_names(names: &[String]) -> HashSet<String> {
+    let mut installed = HashSet::new();
+    if names.is_empty() {
+        return installed;
+    }
+    let mut args = vec!["-Qq", "--"];
+    args.extend(names.iter().map(|s| s.as_str()));
+    let Ok(output) = Command::new("pacman").args(&args).output() else {
+        return installed;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let name = line.trim();
+        if !name.is_empty() {
+            installed.insert(name.to_string());
+        }
+    }
+    return installed;
 }
 
 fn is_installed(name: &str) -> bool {

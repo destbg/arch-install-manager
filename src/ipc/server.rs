@@ -1,6 +1,6 @@
 use std::io;
 use std::os::fd::OwnedFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ use nix::sys::socket::sockopt::PeerCredentials;
 use nix::unistd::{Gid, Uid, User, setgid, setgroups, setuid};
 
 use crate::helpers::database_lock::remove_database_lock;
+use crate::helpers::package_updates::SYNC_STAMP_FILE;
 use crate::helpers::pacman_ignore::{add_to_ignore_pkg, remove_from_ignore_pkg};
 use crate::ipc::protocol::{recv_request, write_response};
 use crate::models::mirror_tool::MirrorTool;
@@ -26,6 +27,7 @@ const BUILD_ROOT: &str = "/var/lib/daim/build";
 const BUILD_HOME: &str = "/var/lib/daim/home";
 const BUILD_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
 const CONNECT_ATTEMPTS: u32 = 30;
+const CHECK_DB_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 
 pub struct Config {
     pub connect_path: PathBuf,
@@ -101,7 +103,7 @@ fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
         clear_stale_lock();
     }
     match &req.op {
-        Op::SyncDb => run_capture("pacman", &["-Sy"]),
+        Op::SyncDb => sync_databases(uid),
         Op::SysUpgrade => run_tty_or_err("pacman", &["-Su"], &[], fds),
         Op::SysUpgradeNoConfirm => run_capture("pacman", &["-Su", "--noconfirm"]),
         Op::Install {
@@ -292,6 +294,84 @@ fn clear_stale_lock() {
         return;
     }
     let _ = std::fs::remove_file(lock);
+}
+
+fn sync_databases(uid: u32) -> Response {
+    if adopt_check_db(uid) {
+        return done_ok();
+    }
+    return run_capture("pacman", &["-Sy"]);
+}
+
+fn adopt_check_db(uid: u32) -> bool {
+    let sync_dir = std::env::temp_dir()
+        .join(format!("daim-checkup-db-{uid}"))
+        .join("sync");
+
+    let Ok(dir_meta) = std::fs::symlink_metadata(&sync_dir) else {
+        return false;
+    };
+    if !dir_meta.is_dir() || dir_meta.uid() != uid {
+        return false;
+    }
+
+    let stamp = sync_dir.join(SYNC_STAMP_FILE);
+    let Ok(stamp_meta) = std::fs::symlink_metadata(&stamp) else {
+        return false;
+    };
+    if !stamp_meta.file_type().is_file() || stamp_meta.uid() != uid {
+        return false;
+    }
+    let fresh = stamp_meta
+        .modified()
+        .ok()
+        .and_then(|mtime| mtime.elapsed().ok())
+        .map(|age| age <= CHECK_DB_MAX_AGE)
+        .unwrap_or(false);
+    if !fresh {
+        return false;
+    }
+
+    let dest_dir = Path::new("/var/lib/pacman/sync");
+    let Ok(entries) = std::fs::read_dir(&sync_dir) else {
+        return false;
+    };
+    let mut copied = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.ends_with(".db") && !name.ends_with(".db.sig") {
+            continue;
+        }
+        if copy_db_file(&entry.path(), &dest_dir.join(name), uid).is_ok() {
+            copied = true;
+        }
+    }
+    return copied;
+}
+
+fn copy_db_file(src: &Path, dest: &Path, uid: u32) -> io::Result<()> {
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true).custom_flags(libc::O_NOFOLLOW);
+    let mut from = open.open(src)?;
+
+    let meta = from.metadata()?;
+    if !meta.is_file() || meta.uid() != uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "untrusted database file",
+        ));
+    }
+
+    let mut to = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest)?;
+    io::copy(&mut from, &mut to)?;
+    return Ok(());
 }
 
 fn run_capture(program: &str, args: &[&str]) -> Response {

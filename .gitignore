@@ -9,6 +9,14 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
+# AI
+.github/context-mode
+AGENTS.md
+.claude/
+opencode.json
+.kimi-code/
+.agents/
+
 # AUR build artifacts
 arch-install-manager-*.pkg.tar.zst
 pkg/

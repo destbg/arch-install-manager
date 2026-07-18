@@ -20,6 +20,8 @@ use crate::models::package_source::PackageSource;
 use crate::models::package_update::PackageUpdate;
 use crate::models::update_error::UpdateError;
 
+pub const SYNC_STAMP_FILE: &str = ".daim-synced";
+
 impl Display for UpdateError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         return match self {
@@ -264,6 +266,7 @@ pub fn sync_temp_db() -> Result<String, UpdateError> {
         let stderr = String::from_utf8_lossy(&sync.stderr);
         return Err(UpdateError::SyncFailed(stderr.trim().to_string()));
     }
+    let _ = fs::write(db_path.join("sync").join(SYNC_STAMP_FILE), "");
     return Ok(db_arg);
 }
 
