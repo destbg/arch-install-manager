@@ -142,16 +142,22 @@ fn match_rank(name: &str, description: &str, needle: &str) -> u8 {
     if name == needle {
         return 0;
     }
-    if name.starts_with(needle) {
+    if name
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|word| word == needle)
+    {
         return 1;
     }
-    if name.contains(needle) {
+    if name.starts_with(needle) {
         return 2;
     }
-    if description.to_lowercase().contains(needle) {
+    if name.contains(needle) {
         return 3;
     }
-    return 4;
+    if description.to_lowercase().contains(needle) {
+        return 4;
+    }
+    return 5;
 }
 
 fn source_rank(source: PackageSource) -> u8 {
