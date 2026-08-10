@@ -1,6 +1,6 @@
 use crate::{
     helpers::aur_maintainers::{read_maintainers, write_maintainers},
-    helpers::aur_pkgbuild::pkgbuild_needs_review,
+    helpers::aur_pkgbuild::{find_clone_dir, pkgbuild_needs_review, refresh_clone},
     helpers::aur_scan::enrich_with_aur_scan,
     helpers::network::http_get,
     models::{aur_info::AurInfo, package_source::PackageSource, package_update::PackageUpdate},
@@ -63,6 +63,9 @@ pub fn get_aur_updates() -> Result<Vec<PackageUpdate>> {
 
     enrich_with_aur_info(&mut updates);
     for update in &mut updates {
+        if let Some(dir) = find_clone_dir(&update.name) {
+            refresh_clone(&dir);
+        }
         update.pkgbuild_needs_review = pkgbuild_needs_review(&update.name);
     }
     enrich_with_aur_scan(&mut updates);

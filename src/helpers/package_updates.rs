@@ -8,6 +8,7 @@ use std::fmt::{Display, Formatter};
 use std::os::unix::fs::symlink;
 use std::os::unix::io::AsRawFd;
 use std::process::Command;
+use std::thread;
 use std::{env, error, fmt, fs};
 
 use crate::helpers::appimage::get_appimage_updates;
@@ -47,6 +48,17 @@ impl From<anyhow::Error> for UpdateError {
 }
 
 pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
+    let settings = load_settings();
+    let aur_handle = settings
+        .enable_aur_support
+        .then(|| thread::spawn(get_aur_updates));
+    let flatpak_handle = settings
+        .enable_flatpak_support
+        .then(|| thread::spawn(get_flatpak_updates));
+    let appimage_handle = settings
+        .enable_appimage_support
+        .then(|| thread::spawn(get_appimage_updates));
+
     let db_path = sync_temp_db()?;
 
     let output = Command::new("pacman")
@@ -168,37 +180,27 @@ pub fn get_package_updates() -> Result<Vec<PackageUpdate>, UpdateError> {
         }
     }
 
-    let settings = load_settings();
-    if settings.enable_aur_support {
-        match get_aur_updates() {
-            Ok(mut aur_updates) => {
-                updates.append(&mut aur_updates);
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to get AUR updates: {}", e);
-            }
+    if let Some(handle) = aur_handle {
+        match handle.join() {
+            Ok(Ok(mut aur_updates)) => updates.append(&mut aur_updates),
+            Ok(Err(e)) => eprintln!("Warning: Failed to get AUR updates: {}", e),
+            Err(_) => eprintln!("Warning: AUR update check panicked"),
         }
     }
 
-    if settings.enable_flatpak_support {
-        match get_flatpak_updates() {
-            Ok(mut flatpak_updates) => {
-                updates.append(&mut flatpak_updates);
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to get Flatpak updates: {}", e);
-            }
+    if let Some(handle) = flatpak_handle {
+        match handle.join() {
+            Ok(Ok(mut flatpak_updates)) => updates.append(&mut flatpak_updates),
+            Ok(Err(e)) => eprintln!("Warning: Failed to get Flatpak updates: {}", e),
+            Err(_) => eprintln!("Warning: Flatpak update check panicked"),
         }
     }
 
-    if settings.enable_appimage_support {
-        match get_appimage_updates() {
-            Ok(mut appimage_updates) => {
-                updates.append(&mut appimage_updates);
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to get AppImage updates: {}", e);
-            }
+    if let Some(handle) = appimage_handle {
+        match handle.join() {
+            Ok(Ok(mut appimage_updates)) => updates.append(&mut appimage_updates),
+            Ok(Err(e)) => eprintln!("Warning: Failed to get AppImage updates: {}", e),
+            Err(_) => eprintln!("Warning: AppImage update check panicked"),
         }
     }
 

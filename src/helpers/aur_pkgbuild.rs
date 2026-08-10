@@ -11,8 +11,16 @@ use std::process::Command;
 const PKGBUILD_FETCH_TIMEOUT_SECS: u32 = 10;
 const MAX_REVIEW_FILE_BYTES: usize = 1_000_000;
 
+pub fn refresh_clone(dir: &Path) {
+    let user = get_original_user();
+    if let Some(dir_str) = dir.to_str() {
+        let _ = run_git(user.as_deref(), dir_str, &["fetch", "--quiet"]);
+    }
+}
+
 pub fn prepare_pkgbuild_review(package: &str) -> Result<PkgbuildReview> {
     if let Some(dir) = find_clone_dir(package) {
+        refresh_clone(&dir);
         if let Some((diff, needs_review)) = compute_review(&dir) {
             return Ok(PkgbuildReview {
                 package: package.to_string(),
@@ -78,8 +86,6 @@ pub fn find_clone_dir(package: &str) -> Option<PathBuf> {
 fn compute_review(dir: &Path) -> Option<(String, bool)> {
     let user = get_original_user();
     let dir_str = dir.to_str()?;
-
-    let _ = run_git(user.as_deref(), dir_str, &["fetch", "--quiet"]);
 
     let output = run_git(
         user.as_deref(),

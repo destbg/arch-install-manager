@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::helpers::aur::url_encode;
-use crate::helpers::aur_pkgbuild::find_clone_dir;
+use crate::helpers::aur_pkgbuild::{find_clone_dir, refresh_clone};
 use crate::helpers::elevated::get_original_user;
 use crate::helpers::network::http_get;
 use crate::models::aur_scan_finding::AurScanFinding;
@@ -33,11 +33,21 @@ pub fn enrich_with_aur_scan(updates: &mut [PackageUpdate]) {
         if update.source != PackageSource::Aur {
             continue;
         }
-        update.aur_scan_findings = scan_package(&update.name);
+        update.aur_scan_findings = scan_cached(&update.name);
     }
 }
 
 pub fn scan_package(package: &str) -> Vec<AurScanFinding> {
+    if let Some(dir) = find_clone_dir(package) {
+        refresh_clone(&dir);
+        if let Some(findings) = scan_clone_latest(&dir) {
+            return findings;
+        }
+    }
+    return scan_remote_pkgbuild(package);
+}
+
+fn scan_cached(package: &str) -> Vec<AurScanFinding> {
     if let Some(dir) = find_clone_dir(package) {
         if let Some(findings) = scan_clone_latest(&dir) {
             return findings;
@@ -49,8 +59,6 @@ pub fn scan_package(package: &str) -> Vec<AurScanFinding> {
 fn scan_clone_latest(dir: &Path) -> Option<Vec<AurScanFinding>> {
     let user = get_original_user();
     let dir_str = dir.to_str()?;
-
-    let _ = run_git(user.as_deref(), dir_str, &["fetch", "--quiet"]);
 
     let output = run_git(user.as_deref(), dir_str, &["archive", "FETCH_HEAD"])?;
     if !output.status.success() || output.stdout.is_empty() {

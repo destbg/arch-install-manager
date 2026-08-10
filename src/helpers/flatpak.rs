@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
+use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::helpers::elevated::get_original_user;
+use crate::helpers::tray_state::state_dir;
 use crate::models::flatpak_installation::FlatpakInstallation;
 use crate::models::installed_flatpak::InstalledFlatpak;
 use crate::models::package_source::PackageSource;
@@ -10,6 +13,7 @@ use crate::models::package_update::PackageUpdate;
 
 const INSTALLATIONS: [FlatpakInstallation; 2] =
     [FlatpakInstallation::User, FlatpakInstallation::System];
+const APPSTREAM_REFRESH_MAX_AGE: Duration = Duration::from_secs(6 * 3600);
 
 pub fn is_flatpak_available() -> bool {
     return Command::new("which")
@@ -28,13 +32,11 @@ pub fn get_flatpak_updates() -> Result<Vec<PackageUpdate>> {
     let installed = get_installed_flatpaks();
     let appstream_handler = has_appstream_handler();
 
+    refresh_appstream();
+
     let mut updates = Vec::new();
 
     for installation in INSTALLATIONS {
-        let _ = flatpak_command(installation)
-            .args(["update", "--appstream", installation.flag()])
-            .output();
-
         let output = flatpak_command(installation)
             .args(&[
                 "remote-ls",
@@ -260,6 +262,31 @@ pub fn search_flatpak(term: &str) -> Vec<PackageUpdate> {
     }
 
     return out;
+}
+
+fn refresh_appstream() {
+    let stamp = state_dir().map(|d| d.join("flatpak-appstream.stamp"));
+    if let Some(path) = &stamp {
+        let fresh = fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .map(|age| age < APPSTREAM_REFRESH_MAX_AGE)
+            .unwrap_or(false);
+        if fresh {
+            return;
+        }
+    }
+
+    for installation in INSTALLATIONS {
+        let _ = flatpak_command(installation)
+            .args(["update", "--appstream", installation.flag()])
+            .output();
+    }
+
+    if let Some(path) = stamp {
+        let _ = fs::write(path, "");
+    }
 }
 
 fn flatpak_command(installation: FlatpakInstallation) -> Command {
