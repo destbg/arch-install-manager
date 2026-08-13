@@ -696,6 +696,12 @@ expect {{
         send -- "y\r"
         exp_continue
     }}
+    -re {{\? \[(Y/n|y/N)\] ?$}} {{
+        expect_user -re {{([^\n]*)\n}} {{
+            send -- "$expect_out(1,string)\r"
+        }}
+        exp_continue
+    }}
     eof
 }}
 catch wait result
