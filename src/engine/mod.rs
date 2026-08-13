@@ -206,6 +206,13 @@ pub fn upgrade() -> i32 {
     return 0;
 }
 
+pub fn colorize_shell(text: &str, tty: bool) -> String {
+    if !tty {
+        return text.to_string();
+    }
+    return text.split_inclusive('\n').map(colorize_sh_line).collect();
+}
+
 fn render(items: &[PackageUpdate], numbered: bool) {
     let tty = std::io::stdout().is_terminal();
 
@@ -315,6 +322,45 @@ fn paint(tty: bool, code: &str, text: &str) -> String {
         return format!("\x1b[{code}m{text}\x1b[0m");
     }
     return text.to_string();
+}
+
+fn colorize_sh_line(line: &str) -> String {
+    let (body, nl) = match line.strip_suffix('\n') {
+        Some(b) => (b, "\n"),
+        None => (line, ""),
+    };
+    if body.trim_start().starts_with('#') {
+        return format!("{}{}", paint(true, "90", body), nl);
+    }
+    let mut out = String::with_capacity(body.len());
+    let mut buf = String::new();
+    let mut quote: Option<char> = None;
+    for c in body.chars() {
+        match quote {
+            Some(q) => {
+                buf.push(c);
+                if c == q {
+                    out.push_str(&paint(true, "32", &buf));
+                    buf.clear();
+                    quote = None;
+                }
+            }
+            None if c == '\'' || c == '"' => {
+                out.push_str(&buf);
+                buf.clear();
+                quote = Some(c);
+                buf.push(c);
+            }
+            None => buf.push(c),
+        }
+    }
+    if quote.is_some() {
+        out.push_str(&paint(true, "32", &buf));
+    } else {
+        out.push_str(&buf);
+    }
+    out.push_str(nl);
+    return out;
 }
 
 fn parse_picks(line: &str, total: usize) -> Vec<usize> {
@@ -515,7 +561,7 @@ fn print_review(build: &AurBuild) {
     match read_pkgbuild(&build.dir) {
         Some(text) => {
             println!("PKGBUILD:");
-            println!("{text}");
+            println!("{}", colorize_shell(&text, std::io::stdout().is_terminal()));
         }
         None => println!("(could not read PKGBUILD)"),
     }
@@ -762,12 +808,17 @@ fn git_head(dir: &Path) -> Option<String> {
 
 fn git_diff(dir: &Path, from: &str) -> Option<String> {
     let dir_str = dir.to_string_lossy().to_string();
+    let color = if std::io::stdout().is_terminal() {
+        "--color=always"
+    } else {
+        "--no-color"
+    };
     let output = Command::new("git")
         .args([
             "-C",
             &dir_str,
             "diff",
-            "--no-color",
+            color,
             from,
             "HEAD",
             "--",
