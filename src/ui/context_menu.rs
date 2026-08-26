@@ -22,7 +22,9 @@ use crate::ui::aur_scan_dialog::show_aur_scan_dialog;
 use crate::ui::dialogs::show_error_dialog;
 use crate::ui::downgrade_dialog::show_downgrade_dialog;
 use crate::ui::install_review::review_then_install;
-use crate::ui::main_window::{load_packages, refresh_manage_list, remove_from_update_list};
+use crate::ui::main_window::{
+    load_packages, refresh_install_list, refresh_manage_list, remove_from_update_list,
+};
 use crate::ui::package_files_dialog::show_package_files_dialog;
 use crate::ui::package_list::refresh_favorite_button;
 use crate::ui::pkgbuild_review_dialog::show_pkgbuild_review_dialog;
@@ -89,7 +91,7 @@ pub fn show_package_context_menu(
                         ChangeKind::Install,
                         true,
                         true,
-                        || {},
+                        || refresh_install_list(),
                     );
                 });
             }

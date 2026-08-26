@@ -55,10 +55,18 @@ thread_local! {
     pub static POST_UPDATE_PAGE: RefCell<Option<PostUpdatePage>> = RefCell::new(None);
     static UPDATE_LOADING: RefCell<Option<(GtkBox, gtk4::Spinner)>> = RefCell::new(None);
     static MANAGE_REFRESH: RefCell<Option<std::rc::Rc<dyn Fn()>>> = RefCell::new(None);
+    static INSTALL_REFRESH: RefCell<Option<std::rc::Rc<dyn Fn()>>> = RefCell::new(None);
 }
 
 pub fn refresh_manage_list() {
     let callback = MANAGE_REFRESH.with(|cell| cell.borrow().clone());
+    if let Some(callback) = callback {
+        callback();
+    }
+}
+
+pub fn refresh_install_list() {
+    let callback = INSTALL_REFRESH.with(|cell| cell.borrow().clone());
     if let Some(callback) = callback {
         callback();
     }
@@ -1228,6 +1236,8 @@ fn build_install_tab(window: &ApplicationWindow) -> GtkBox {
     let store_for_install = store.clone();
     let window_for_install = window.clone();
     let run_search_for_install = run_search.clone();
+
+    INSTALL_REFRESH.with(|cell| *cell.borrow_mut() = Some(run_search.clone()));
     install_btn.connect_clicked(move |_| {
         let targets = collect_selected_targets(&store_for_install);
         if targets.is_empty() {
