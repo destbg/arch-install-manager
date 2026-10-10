@@ -1,7 +1,8 @@
+use crate::ui::spinner::create_spinner;
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow,
-    Separator, Spinner,
+    Separator,
 };
 
 use crate::helpers::elevated::open_url_as_user;
@@ -160,9 +161,7 @@ fn build_loading_view() -> GtkBox {
     wrapper.set_vexpand(true);
     wrapper.set_hexpand(true);
 
-    let spinner = Spinner::new();
-    spinner.set_size_request(32, 32);
-    spinner.start();
+    let spinner = create_spinner(32);
     wrapper.append(&spinner);
 
     let label = Label::new(Some("Checking the Arch security tracker..."));

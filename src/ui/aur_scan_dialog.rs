@@ -1,7 +1,8 @@
+use crate::ui::spinner::create_spinner;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Frame, Label, Orientation, PolicyType, ScrolledWindow, Separator,
-    Spinner, Window, WrapMode,
+    Align, Box as GtkBox, Frame, Label, Orientation, PolicyType, ScrolledWindow, Separator, Window,
+    WrapMode,
 };
 use sourceview5::prelude::*;
 use sourceview5::{LanguageManager, View};
@@ -174,9 +175,7 @@ fn build_loading_view(package: &str) -> GtkBox {
     wrapper.set_vexpand(true);
     wrapper.set_hexpand(true);
 
-    let spinner = Spinner::new();
-    spinner.set_size_request(32, 32);
-    spinner.start();
+    let spinner = create_spinner(32);
     wrapper.append(&spinner);
 
     let label = Label::new(Some(&format!("Scanning {} with aur-scan...", package)));

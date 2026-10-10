@@ -1,7 +1,8 @@
+use crate::ui::spinner::create_spinner;
 use gtk4::prelude::*;
 use gtk4::{
     AlertDialog, Align, ApplicationWindow, Box as GtkBox, Button, Label, Orientation, Separator,
-    Spinner, Window,
+    Window,
 };
 
 pub fn build_dialog_window(
@@ -69,10 +70,7 @@ pub fn create_progress_dialog(parent: &Window, title: &str, message: &str) -> Wi
     content.set_margin_top(20);
     content.set_margin_bottom(20);
 
-    let spinner = Spinner::new();
-    spinner.set_size_request(32, 32);
-    spinner.set_valign(gtk4::Align::Center);
-    spinner.start();
+    let spinner = create_spinner(32);
     content.append(&spinner);
 
     let label = Label::new(Some(message));

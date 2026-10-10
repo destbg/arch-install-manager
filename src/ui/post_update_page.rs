@@ -1,8 +1,9 @@
+use crate::ui::spinner::create_spinner;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, ApplicationWindow, Box as GtkBox, Button, CheckButton, Image, Label, ListBox,
-    ListBoxRow, ListItem, ListView, NoSelection, Orientation, ScrolledWindow, SelectionMode,
-    Separator, SignalListItemFactory, Spinner, StringList, StringObject,
+    Align, ApplicationWindow, Box as GtkBox, Button, CheckButton, DrawingArea, Image, Label,
+    ListBox, ListBoxRow, ListItem, ListView, NoSelection, Orientation, ScrolledWindow,
+    SelectionMode, Separator, SignalListItemFactory, StringList, StringObject,
 };
 use shlex::try_quote;
 use std::cell::RefCell;
@@ -847,8 +848,8 @@ fn build_loading_box() -> GtkBox {
     outer.set_margin_top(48);
     outer.set_margin_bottom(48);
 
-    let spinner = Spinner::new();
-    spinner.set_size_request(40, 40);
+    let spinner = create_spinner(40);
+    spinner.set_visible(false);
     spinner.set_widget_name("post-update-spinner");
     outer.append(&spinner);
 
@@ -864,8 +865,8 @@ fn build_loading_box() -> GtkBox {
 fn start_loading_spinner(loading_box: &GtkBox) {
     let mut child = loading_box.first_child();
     while let Some(widget) = child {
-        if let Some(spinner) = widget.downcast_ref::<Spinner>() {
-            spinner.set_spinning(true);
+        if let Some(spinner) = widget.downcast_ref::<DrawingArea>() {
+            spinner.set_visible(true);
             return;
         }
         child = widget.next_sibling();
@@ -875,8 +876,8 @@ fn start_loading_spinner(loading_box: &GtkBox) {
 fn stop_loading_spinner(loading_box: &GtkBox) {
     let mut child = loading_box.first_child();
     while let Some(widget) = child {
-        if let Some(spinner) = widget.downcast_ref::<Spinner>() {
-            spinner.set_spinning(false);
+        if let Some(spinner) = widget.downcast_ref::<DrawingArea>() {
+            spinner.set_visible(false);
             return;
         }
         child = widget.next_sibling();
@@ -1157,9 +1158,7 @@ fn kick_off_service_restart(rows: Rc<RefCell<Vec<ServiceRowState>>>, index: usiz
         };
         row.check.set_sensitive(false);
         clear_box(&row.status_box);
-        let spinner = Spinner::new();
-        spinner.set_spinning(true);
-        spinner.set_size_request(16, 16);
+        let spinner = create_spinner(16);
         row.status_box.append(&spinner);
         service_name = row.name.clone();
     }

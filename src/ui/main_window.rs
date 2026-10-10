@@ -37,6 +37,7 @@ use crate::ui::package_list::{
 };
 use crate::ui::settings_dialog::show_settings_dialog;
 use crate::ui::snapshot::run_change_command;
+use crate::ui::spinner::create_spinner;
 use crate::ui::terminal_page::run_command_in_dialog;
 use crate::ui::toolbar::create_toolbar;
 use crate::ui::vulnerabilities_dialog::show_vulnerabilities_dialog;
@@ -44,16 +45,16 @@ use gio::ListStore;
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Button, ColumnView, ColumnViewColumn,
-    EventControllerKey, FilterListModel, HeaderBar, Orientation, Paned, PropagationPhase,
-    ScrolledWindow, SearchBar, SearchEntry, Separator, SingleSelection, SortListModel, Stack,
-    StackSwitcher, ToggleButton,
+    DrawingArea, EventControllerKey, FilterListModel, HeaderBar, Orientation, Paned,
+    PropagationPhase, ScrolledWindow, SearchBar, SearchEntry, Separator, SingleSelection,
+    SortListModel, Stack, StackSwitcher, ToggleButton,
 };
 use shlex::try_quote;
 use std::cell::RefCell;
 
 thread_local! {
     pub static POST_UPDATE_PAGE: RefCell<Option<PostUpdatePage>> = RefCell::new(None);
-    static UPDATE_LOADING: RefCell<Option<(GtkBox, gtk4::Spinner)>> = RefCell::new(None);
+    static UPDATE_LOADING: RefCell<Option<(GtkBox, DrawingArea)>> = RefCell::new(None);
     static MANAGE_REFRESH: RefCell<Option<std::rc::Rc<dyn Fn()>>> = RefCell::new(None);
     static INSTALL_REFRESH: RefCell<Option<std::rc::Rc<dyn Fn()>>> = RefCell::new(None);
 }
@@ -606,7 +607,7 @@ fn build_update_tab(decorations_disabled: bool, window: &ApplicationWindow) -> G
     return outer;
 }
 
-fn build_update_loading() -> (GtkBox, gtk4::Spinner) {
+fn build_update_loading() -> (GtkBox, DrawingArea) {
     install_loading_css();
 
     let container = GtkBox::new(Orientation::Vertical, 0);
@@ -621,9 +622,7 @@ fn build_update_loading() -> (GtkBox, gtk4::Spinner) {
     center.set_halign(gtk4::Align::Center);
     center.set_valign(gtk4::Align::Center);
 
-    let spinner = gtk4::Spinner::new();
-    spinner.set_width_request(48);
-    spinner.set_height_request(48);
+    let spinner = create_spinner(48);
 
     let label = gtk4::Label::new(Some("Loading package updates..."));
     label.add_css_class("title-3");
@@ -667,7 +666,7 @@ fn build_list_with_info_panel(
     list_view: &ColumnView,
     window: &ApplicationWindow,
     loading_text: &str,
-) -> (Paned, GtkBox, gtk4::Spinner) {
+) -> (Paned, GtkBox, DrawingArea) {
     install_loading_css();
 
     let scrolled = ScrolledWindow::builder()
@@ -677,8 +676,7 @@ fn build_list_with_info_panel(
         .child(list_view)
         .build();
 
-    let spinner = gtk4::Spinner::new();
-    spinner.set_size_request(36, 36);
+    let spinner = create_spinner(36);
 
     let loading_label = gtk4::Label::new(Some(loading_text));
     loading_label.add_css_class("title-4");
@@ -694,6 +692,7 @@ fn build_list_with_info_panel(
     let loading = GtkBox::new(Orientation::Vertical, 0);
     loading.add_css_class("daim-loading-overlay");
     loading.set_can_target(false);
+    loading.set_visible(false);
     loading.set_hexpand(true);
     loading.set_vexpand(true);
     loading.append(&center);
@@ -741,20 +740,20 @@ fn install_loading_css() {
     });
 }
 
-fn show_loading(loading: &GtkBox, spinner: &gtk4::Spinner) {
+fn show_loading(loading: &GtkBox, spinner: &DrawingArea) {
     loading.set_visible(true);
-    spinner.start();
+    spinner.set_visible(true);
     loading.add_css_class("is-loading");
     return;
 }
 
-fn hide_loading(loading: &GtkBox, spinner: &gtk4::Spinner) {
+fn hide_loading(loading: &GtkBox, spinner: &DrawingArea) {
     loading.remove_css_class("is-loading");
     let loading = loading.clone();
     let spinner = spinner.clone();
     glib::timeout_add_local_once(std::time::Duration::from_millis(140), move || {
         if !loading.has_css_class("is-loading") {
-            spinner.stop();
+            spinner.set_visible(false);
             loading.set_visible(false);
         }
     });

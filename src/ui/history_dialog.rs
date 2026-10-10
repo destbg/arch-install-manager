@@ -1,9 +1,9 @@
+use crate::ui::spinner::create_spinner;
 use gio::ListStore;
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, ColumnView, ColumnViewColumn, Label, ListItem,
-    NoSelection, Orientation, PolicyType, ScrolledWindow, Spinner, TreeExpander, TreeListModel,
-    TreeListRow,
+    NoSelection, Orientation, PolicyType, ScrolledWindow, TreeExpander, TreeListModel, TreeListRow,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -353,9 +353,7 @@ fn build_loading_view() -> GtkBox {
     wrapper.set_vexpand(true);
     wrapper.set_hexpand(true);
 
-    let spinner = Spinner::new();
-    spinner.set_size_request(32, 32);
-    spinner.start();
+    let spinner = create_spinner(32);
     wrapper.append(&spinner);
 
     let label = Label::new(Some("Reading the pacman log..."));
