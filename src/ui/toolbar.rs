@@ -689,20 +689,11 @@ fn build_install_command(
 fn auto_confirm_install(command: &str) -> String {
     return format!(
         r#"(expect -c '
-set timeout -1
 spawn {command}
-expect {{
-    -re {{Proceed with installation\? \[Y/n\]}} {{
+interact {{
+    -o -nobuffer -re {{Proceed with installation\? \[Y/n\]}} {{
         send -- "y\r"
-        exp_continue
     }}
-    -re {{\? \[(Y/n|y/N)\] ?$}} {{
-        expect_user -re {{([^\n]*)\n}} {{
-            send -- "$expect_out(1,string)\r"
-        }}
-        exp_continue
-    }}
-    eof
 }}
 catch wait result
 set exit_code [lindex $result 3]
