@@ -9,6 +9,7 @@ use crate::helpers::snapper::{is_snap_pac_installed, is_snapper_installed};
 use crate::ipc::client::call;
 use crate::models::change_kind::ChangeKind;
 use crate::models::op::Op;
+use crate::models::response::Response;
 use crate::ui::dialogs::{create_progress_dialog, show_error_dialog};
 use crate::ui::terminal_page::run_command_in_dialog;
 
@@ -97,14 +98,20 @@ pub fn run_change_command<F>(
 
 fn create_snapshots(timeshift: bool, snapper: bool) -> Result<(), String> {
     if timeshift {
-        let resp = call(Op::SnapshotTimeshift {
-            comment: TIMESHIFT_COMMENT.to_string(),
+        let settings = load_settings();
+        let resp = call(Op::SnapshotTimeshiftAndCleanup {
+            retention_count: settings.snapshot_retention_count,
+            retention_period: settings.snapshot_retention_period,
         })
         .map_err(|e| e.to_string())?;
         if !resp.is_success() {
-            return Err(
-                "Could not create the Timeshift snapshot. Nothing was changed.".to_string(),
-            );
+            let detail = match resp {
+                Response::Error { message } => message,
+                Response::Done { stderr, .. } => stderr,
+            };
+            return Err(format!(
+                "Timeshift snapshot preparation failed. Package changes were not started.\n{detail}"
+            ));
         }
     }
     if snapper {

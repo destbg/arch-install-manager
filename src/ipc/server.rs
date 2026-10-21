@@ -12,9 +12,11 @@ use nix::sys::socket::getsockopt;
 use nix::sys::socket::sockopt::PeerCredentials;
 use nix::unistd::{Gid, Uid, User, setgid, setgroups, setuid};
 
+use crate::constants::TIMESHIFT_COMMENT;
 use crate::helpers::database_lock::remove_database_lock;
 use crate::helpers::package_updates::SYNC_STAMP_FILE;
 use crate::helpers::pacman_ignore::{add_to_ignore_pkg, remove_from_ignore_pkg};
+use crate::helpers::timeshift::{cleanup_timeshift_snapshots, create_timeshift_snapshot};
 use crate::ipc::protocol::{recv_request, write_response};
 use crate::models::mirror_tool::MirrorTool;
 use crate::models::op::Op;
@@ -205,6 +207,31 @@ fn execute(req: &Request, fds: Vec<OwnedFd>, uid: u32) -> Response {
             "timeshift",
             &["--create", "--comments", comment, "--tags", "O"],
         ),
+        Op::SnapshotTimeshiftAndCleanup {
+            retention_count,
+            retention_period,
+        } => {
+            if *retention_count == 0 {
+                return Response::error("At least one snapshot must be retained");
+            }
+            let newest = match create_timeshift_snapshot(TIMESHIFT_COMMENT) {
+                Ok(name) => name,
+                Err(error) => {
+                    return Response::error(format!("Could not create Timeshift snapshot: {error}"));
+                }
+            };
+            match cleanup_timeshift_snapshots(
+                TIMESHIFT_COMMENT,
+                *retention_count,
+                retention_period,
+                &newest,
+            ) {
+                Ok(()) => done_ok(),
+                Err(error) => {
+                    Response::error(format!("Snapshot created, but cleanup failed: {error}"))
+                }
+            }
+        }
         Op::SnapshotSnapper { description } => run_capture(
             "snapper",
             &[

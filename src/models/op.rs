@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::models::mirror_tool::MirrorTool;
+use crate::models::snapshot_retention_period::SnapshotRetentionPeriod;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Op {
@@ -43,6 +44,10 @@ pub enum Op {
     },
     SnapshotTimeshift {
         comment: String,
+    },
+    SnapshotTimeshiftAndCleanup {
+        retention_count: u32,
+        retention_period: SnapshotRetentionPeriod,
     },
     SnapshotSnapper {
         description: String,

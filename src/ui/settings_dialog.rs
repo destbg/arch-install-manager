@@ -949,8 +949,9 @@ fn create_snapshot_group(settings: &AppSettings, main_container: &gtk4::Box) -> 
 
     section.append(&retention_period_box);
 
-    let deletion_info_label =
-        gtk4::Label::new(Some("Old snapshots are only deleted when updating."));
+    let deletion_info_label = gtk4::Label::new(Some(
+        "Old snapshots are deleted after a new Timeshift snapshot is created.",
+    ));
     deletion_info_label.set_wrap(true);
     deletion_info_label.set_xalign(0.0);
     deletion_info_label.set_margin_top(8);
